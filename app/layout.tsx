@@ -5,8 +5,8 @@ import { Inter } from 'next/font/google';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'Audio to Text Converter | AI-Powered Transcription',
-  description: 'Convert your audio files to text using AI-powered transcription with Gemini API',
+  title: 'DP2 - User Story Generator',
+  description: 'Generate user stories from software requirements using AI-powered analysis with Gemini API',
 };
 
 export default function RootLayout({
