@@ -1,8 +1,14 @@
 
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-// Use the provided Gemini API key directly
-const genAI = new GoogleGenerativeAI('AIzaSyBl3DxNKn5MMo7ZXFs4qnTkC69Tzc_6y4w');
+// Use environment variable for API key
+const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
+
+if (!apiKey) {
+  throw new Error('NEXT_PUBLIC_GEMINI_API_KEY environment variable is not set');
+}
+
+const genAI = new GoogleGenerativeAI(apiKey);
 
 
 export async function transcribeAudio(audioFile: File): Promise<string> {
@@ -29,7 +35,7 @@ export async function transcribeAudio(audioFile: File): Promise<string> {
           mimeType: audioFile.type
         }
       },
-      'Please transcribe this audio file and return only the text content.'
+      'Please transcribe this audio or video file and return only the text content. Extract all spoken words accurately.'
     ]);
 
     return result.response.text();
