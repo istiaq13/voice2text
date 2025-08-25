@@ -1,14 +1,8 @@
 
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-// Use environment variable for API key
-const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
-
-if (!apiKey) {
-  throw new Error('NEXT_PUBLIC_GEMINI_API_KEY environment variable is not set');
-}
-
-const genAI = new GoogleGenerativeAI(apiKey);
+// Use the API key directly
+const genAI = new GoogleGenerativeAI('AIzaSyBl3DxNKn5MMo7ZXFs4qnTkC69Tzc_6y4w');
 
 
 export async function transcribeAudio(audioFile: File): Promise<string> {
