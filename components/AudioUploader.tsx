@@ -218,6 +218,13 @@ export default function AudioUploader() {
       }
 
       setRequirements(data.text);
+      
+      // Manually trigger keyword suggestions after file extraction
+      if (data.text.length > 50) {
+        const suggested = autoSuggestKeywords(data.text);
+        setSuggestedKeywords(suggested);
+      }
+      
       console.log(`✅ Extracted ${data.characterCount} characters using ${data.method}`);
       
     } catch (err) {
@@ -450,12 +457,22 @@ Make sure each user story follows the standard format and is relevant to the req
             
             {requirements && (
               <div className="space-y-2">
-                <h4 className="text-md font-medium text-gray-900 dark:text-white">Extracted Requirements:</h4>
-                <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border dark:border-gray-700 max-h-40 overflow-y-auto">
-                  <p className="text-gray-800 dark:text-gray-200 text-sm whitespace-pre-wrap">
-                    {requirements.substring(0, 500)}{requirements.length > 500 ? '...' : ''}
+                <div className="flex items-center justify-between">
+                  <h4 className="text-md font-medium text-gray-900 dark:text-white">Extracted Requirements:</h4>
+                  <span className="text-xs text-gray-500 dark:text-gray-400">
+                    {requirements.length.toLocaleString()} characters
+                  </span>
+                </div>
+                <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border dark:border-gray-700 max-h-96 overflow-y-auto">
+                  <p className="text-gray-800 dark:text-gray-200 text-sm whitespace-pre-wrap leading-relaxed">
+                    {requirements}
                   </p>
                 </div>
+                {requirements.length > 1000 && (
+                  <p className="text-xs text-gray-500 dark:text-gray-400 italic">
+                    Scroll to view full content
+                  </p>
+                )}
               </div>
             )}
           </TabsContent>
