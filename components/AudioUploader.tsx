@@ -3,12 +3,12 @@
 import React, { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { Upload, FileText, FileAudio, Loader2, CheckCircle, AlertCircle, Download, X, Plus } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Button } from '@/components/core/button';
+import { Card } from '@/components/core/layout';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/core/form';
+import { Input } from '@/components/core/form';
+import { Textarea } from '@/components/core/form';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/core/layout';
 import { softwareKeywords } from '@/lib/keywords';
 import { transcribeAudio } from '@/lib/gemini';
 
