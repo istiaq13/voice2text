@@ -1,29 +1,103 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
-// Use the API key directly
-const genAI = new GoogleGenerativeAI('AIzaSyBl3DxNKn5MMo7ZXFs4qnTkC69Tzc_6y4w');
+// Mark this route as dynamic
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
+// Initialize Gemini AI with API key from environment variables
+const apiKey = process.env.GOOGLE_API_KEY;
+
+if (!apiKey) {
+  throw new Error('GOOGLE_API_KEY is not set in environment variables');
+}
+
+const genAI = new GoogleGenerativeAI(apiKey);
 
 export async function POST(req: NextRequest) {
   try {
-    const { prompt } = await req.json();
+    const body = await req.json();
+    const { prompt } = body;
 
-    if (!prompt) {
-      return NextResponse.json({ error: 'Prompt is required' }, { status: 400 });
+    // Validation
+    if (!prompt || typeof prompt !== 'string') {
+      return NextResponse.json(
+        { error: 'Valid prompt is required' }, 
+        { status: 400 }
+      );
     }
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    if (prompt.trim().length < 20) {
+      return NextResponse.json(
+        { error: 'Prompt is too short. Please provide more detailed requirements.' },
+        { status: 400 }
+      );
+    }
+
+    if (prompt.length > 10000) {
+      return NextResponse.json(
+        { error: 'Prompt is too long. Please limit to 10,000 characters.' },
+        { status: 400 }
+      );
+    }
+
+    // Use gemini-2.5-flash - the current free tier model available as of Oct 2025
+    // This model replaced gemini-pro for free tier users
+    const model = genAI.getGenerativeModel({ 
+      model: 'gemini-2.5-flash',
+    });
 
     const result = await model.generateContent(prompt);
     const response = await result.response;
     const stories = response.text();
 
+    if (!stories || stories.trim().length === 0) {
+      return NextResponse.json(
+        { error: 'No content was generated. Please try again with different requirements.' },
+        { status: 500 }
+      );
+    }
+
     return NextResponse.json({ stories });
   } catch (error) {
     console.error('Error generating user stories:', error);
+    console.error('Error details:', {
+      name: error instanceof Error ? error.name : 'Unknown',
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    });
+    
+    // Handle specific error types
+    let errorMessage = 'Failed to generate user stories';
+    let statusCode = 500;
+
+    if (error instanceof Error) {
+      const errMsg = error.message.toLowerCase();
+      
+      if (errMsg.includes('api_key_invalid') || errMsg.includes('invalid api key')) {
+        errorMessage = 'Invalid API key. Please check your Gemini API key configuration.';
+        statusCode = 401;
+      } else if (errMsg.includes('api key')) {
+        errorMessage = 'API configuration error. Please contact support.';
+        statusCode = 503;
+      } else if (errMsg.includes('quota') || errMsg.includes('rate limit') || errMsg.includes('resource_exhausted')) {
+        errorMessage = 'API rate limit exceeded. Please try again later.';
+        statusCode = 429;
+      } else if (errMsg.includes('network') || errMsg.includes('fetch') || errMsg.includes('econnrefused') || errMsg.includes('timeout')) {
+        errorMessage = 'Network error connecting to Gemini API. Please check your internet connection.';
+        statusCode = 503;
+      } else if (errMsg.includes('permission_denied')) {
+        errorMessage = 'API key does not have permission. Please verify your Gemini API key.';
+        statusCode = 403;
+      } else {
+        // Include the actual error message for debugging
+        errorMessage = `Gemini API error: ${error.message}`;
+      }
+    }
+
     return NextResponse.json(
-      { error: 'Failed to generate user stories' },
-      { status: 500 }
+      { error: errorMessage },
+      { status: statusCode }
     );
   }
 }

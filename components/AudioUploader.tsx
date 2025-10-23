@@ -1,27 +1,17 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
-import { useDropzone } from 'react-dropzone';
-import { Upload, FileText, FileAudio, Loader2, CheckCircle, AlertCircle, Download, X, Plus } from 'lucide-react';
+import React, { useState, useCallback, useEffect } from 'react';
+import { useDropzone, FileRejection } from 'react-dropzone';
+import { Upload, FileText, FileAudio, Loader2, CheckCircle, AlertCircle, Download, X, Plus, Sparkles, Cpu } from 'lucide-react';
 import { Button } from '@/components/core/button';
 import { Card } from '@/components/core/layout';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/core/form';
-import { Input } from '@/components/core/form';
-import { Textarea } from '@/components/core/form';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Input, Textarea } from '@/components/core/form';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/core/layout';
 import { softwareKeywords } from '@/lib/keywords';
 import { transcribeAudio } from '@/lib/gemini';
+import type { UserStoryResult, AIModel } from '@/types';
 
-interface UserStoryResult {
-  requirements: string;
-  keywords: string[];
-  userStories: string;
-  numStories: number;
-  timestamp: any;
-  status: 'processing' | 'completed' | 'error';
-}
-
-export default function UserStoryGenerator() {
+export default function AudioUploader() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [userStoryResult, setUserStoryResult] = useState<UserStoryResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -33,6 +23,30 @@ export default function UserStoryGenerator() {
   const [inputMethod, setInputMethod] = useState<'text' | 'file'>('text');
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [isExtracting, setIsExtracting] = useState(false);
+  const [isLlamaAvailable, setIsLlamaAvailable] = useState(false);
+  const [isCheckingLlama, setIsCheckingLlama] = useState(true);
+  const [llamaModel, setLlamaModel] = useState<string>('');
+
+  // Check Llama availability on component mount
+  useEffect(() => {
+    const checkLlamaAvailability = async () => {
+      try {
+        const response = await fetch('/api/generate-stories-llama');
+        const data = await response.json();
+        setIsLlamaAvailable(data.available || false);
+        if (data.model) {
+          setLlamaModel(data.model);
+        }
+      } catch (error) {
+        console.error('Failed to check Llama availability:', error);
+        setIsLlamaAvailable(false);
+      } finally {
+        setIsCheckingLlama(false);
+      }
+    };
+
+    checkLlamaAvailability();
+  }, []);
 
   const handleKeywordSelect = (keyword: string) => {
     if (!selectedKeywords.includes(keyword)) {
@@ -52,29 +66,67 @@ export default function UserStoryGenerator() {
     }
   };
 
-  const onDrop = useCallback(async (acceptedFiles: File[]) => {
+  const onDrop = useCallback(async (acceptedFiles: File[], fileRejections: FileRejection[]) => {
+    // Handle file rejections
+    if (fileRejections.length > 0) {
+      const rejection = fileRejections[0];
+      if (rejection.errors[0]?.code === 'too-many-files') {
+        setError('Please upload only one file at a time.');
+      } else if (rejection.errors[0]?.code === 'file-invalid-type') {
+        setError('Invalid file type. Please upload a text (.txt), audio (.mp3, .wav, .m4a), or video file (.mp4, .mov).');
+      } else {
+        setError('File upload failed. Please try again.');
+      }
+      return;
+    }
+
     const file = acceptedFiles[0];
     if (!file) return;
+
+    // Validate file size (max 25MB for audio/video)
+    const maxSize = 25 * 1024 * 1024; // 25MB
+    if (file.size > maxSize) {
+      setError(`File is too large (${(file.size / 1024 / 1024).toFixed(2)}MB). Maximum size is 25MB.`);
+      return;
+    }
 
     setUploadedFile(file);
     setError(null);
 
-    // If it's a text file, read it directly
-    if (file.type === 'text/plain') {
-      const text = await file.text();
-      setRequirements(text);
-    } 
-    // If it's an audio/video file, extract text using Gemini
-    else if (file.type.startsWith('audio/') || file.type.startsWith('video/')) {
-      setIsExtracting(true);
-      try {
-        const extractedText = await transcribeAudio(file);
-        setRequirements(extractedText);
-      } catch (err) {
-        setError('Failed to extract text from media file. Please try again.');
-      } finally {
-        setIsExtracting(false);
+    try {
+      // If it's a text file, read it directly
+      if (file.type === 'text/plain') {
+        const text = await file.text();
+        if (!text.trim()) {
+          setError('The text file is empty. Please provide a file with content.');
+          return;
+        }
+        setRequirements(text);
+      } 
+      // If it's an audio/video file, extract text using Gemini
+      else if (file.type.startsWith('audio/') || file.type.startsWith('video/')) {
+        setIsExtracting(true);
+        try {
+          const extractedText = await transcribeAudio(file);
+          if (!extractedText.trim()) {
+            setError('No speech detected in the audio/video file. Please try another file.');
+            return;
+          }
+          setRequirements(extractedText);
+        } catch (err) {
+          console.error('Transcription error:', err);
+          const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
+          setError(`Failed to transcribe audio: ${errorMessage}. Please ensure the file contains clear speech and try again.`);
+        } finally {
+          setIsExtracting(false);
+        }
+      } else {
+        setError('Unsupported file type. Please upload a text, audio, or video file.');
       }
+    } catch (err) {
+      console.error('File processing error:', err);
+      setError('Failed to process file. Please try again.');
+      setIsExtracting(false);
     }
   }, []);
 
@@ -89,9 +141,20 @@ export default function UserStoryGenerator() {
     disabled: isProcessing || isExtracting
   });
 
-  const generateUserStories = async () => {
+  const generateUserStories = async (model: AIModel = 'gemini') => {
+    // Validation
     if (!requirements.trim()) {
-      setError('Please enter software requirements');
+      setError('Please enter software requirements or upload a file.');
+      return;
+    }
+
+    if (requirements.trim().length < 20) {
+      setError('Requirements are too short. Please provide more detailed requirements (at least 20 characters).');
+      return;
+    }
+
+    if (selectedKeywords.length === 0) {
+      setError('Please select at least one keyword to focus the user stories.');
       return;
     }
 
@@ -103,11 +166,12 @@ export default function UserStoryGenerator() {
       userStories: '',
       numStories,
       timestamp: new Date(),
-      status: 'processing'
+      status: 'processing',
+      model,
     });
 
     try {
-      // Call Gemini API to generate user stories
+      // Call appropriate API based on selected model
       const keywordsText = selectedKeywords.length > 0 ? ` Focus on these keywords: ${selectedKeywords.join(', ')}.` : '';
       const prompt = `Generate exactly ${numStories} user stories based on these software requirements: 
 
@@ -122,9 +186,9 @@ Please format the user stories as:
 
 Make sure each user story follows the standard format and is relevant to the requirements provided.`;
       
-      // Here you would integrate with Gemini API
-      // For now, I'll create a more realistic response
-      const response = await fetch('/api/generate-stories', {
+      const apiEndpoint = model === 'llama' ? '/api/generate-stories-llama' : '/api/generate-stories';
+      
+      const response = await fetch(apiEndpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -132,30 +196,33 @@ Make sure each user story follows the standard format and is relevant to the req
         body: JSON.stringify({ prompt }),
       });
 
-      let generatedStories = '';
-      if (response.ok) {
-        const data = await response.json();
-        generatedStories = data.stories;
-      } else {
-        // Fallback with placeholder stories
-        generatedStories = Array.from({ length: numStories }, (_, i) => 
-          `${i + 1}. As a user, I want to access feature ${i + 1} so that I can accomplish my goals efficiently.`
-        ).join('\n\n');
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `API request failed with status ${response.status}`);
       }
+
+      const data = await response.json();
       
+      if (!data.stories || data.stories.trim().length === 0) {
+        throw new Error('No user stories were generated. Please try again with different requirements.');
+      }
+
       const result: UserStoryResult = {
         requirements,
         keywords: selectedKeywords,
-        userStories: generatedStories,
+        userStories: data.stories,
         numStories,
         timestamp: new Date(),
-        status: 'completed'
+        status: 'completed',
+        model,
       };
 
       setUserStoryResult(result);
       
     } catch (err) {
-      setError('Failed to generate user stories. Please try again.');
+      console.error('Story generation error:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
+      setError(`Failed to generate user stories: ${errorMessage}`);
       setUserStoryResult(prev => prev ? { ...prev, status: 'error' } : null);
     } finally {
       setIsProcessing(false);
@@ -190,7 +257,7 @@ Make sure each user story follows the standard format and is relevant to the req
 
       {/* Input Method Selection */}
       <Card className="p-6">
-        <Tabs value={inputMethod} onValueChange={(value) => setInputMethod(value as 'text' | 'file')} className="space-y-4">
+        <Tabs value={inputMethod} onValueChange={(value: string) => setInputMethod(value as 'text' | 'file')} className="space-y-4">
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="text">Manual Input</TabsTrigger>
             <TabsTrigger value="file">File Upload</TabsTrigger>
@@ -201,7 +268,7 @@ Make sure each user story follows the standard format and is relevant to the req
             <Textarea
               placeholder="Enter your software requirements here... (e.g., I need a web application for managing customer orders with user authentication, payment processing, and real-time notifications)"
               value={requirements}
-              onChange={(e) => setRequirements(e.target.value)}
+              onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setRequirements(e.target.value)}
               className="min-h-32"
               disabled={isProcessing}
             />
@@ -282,7 +349,7 @@ Make sure each user story follows the standard format and is relevant to the req
           {/* Number of Stories */}
           <div className="space-y-2">
             <label className="text-sm font-medium text-gray-700">Number of User Stories</label>
-            <Select value={numStories.toString()} onValueChange={(value) => setNumStories(parseInt(value))}>
+            <Select value={numStories.toString()} onValueChange={(value: string) => setNumStories(parseInt(value))}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
@@ -335,8 +402,8 @@ Make sure each user story follows the standard format and is relevant to the req
             <Input
               placeholder="Enter custom keyword"
               value={customKeyword}
-              onChange={(e) => setCustomKeyword(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && handleCustomKeywordAdd()}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCustomKeyword(e.target.value)}
+              onKeyPress={(e: React.KeyboardEvent<HTMLInputElement>) => e.key === 'Enter' && handleCustomKeywordAdd()}
               className="flex-1"
             />
             <Button onClick={handleCustomKeywordAdd} size="sm">
@@ -370,21 +437,77 @@ Make sure each user story follows the standard format and is relevant to the req
           )}
         </div>
 
-        {/* Generate Button */}
-        <Button 
-          onClick={generateUserStories} 
-          className="w-full"
-          disabled={isProcessing || !requirements.trim() || isExtracting}
-        >
-          {isProcessing ? (
-            <>
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              Generating {numStories} User Stories...
-            </>
-          ) : (
-            `Generate ${numStories} User Stories`
+        {/* Generate Buttons */}
+        <div className="space-y-3">
+          <div className="text-sm font-medium text-gray-700 mb-2">
+            Choose AI Model:
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            {/* Gemini Button */}
+            <Button 
+              onClick={() => generateUserStories('gemini')} 
+              className="w-full bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700"
+              disabled={isProcessing || !requirements.trim() || isExtracting}
+            >
+              {isProcessing && userStoryResult?.model === 'gemini' ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Generating...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-4 h-4 mr-2" />
+                  Gemini AI
+                </>
+              )}
+            </Button>
+
+            {/* Llama Button */}
+            <Button 
+              onClick={() => generateUserStories('llama')} 
+              className="w-full bg-gradient-to-r from-green-500 to-teal-600 hover:from-green-600 hover:to-teal-700"
+              disabled={!isLlamaAvailable || isProcessing || !requirements.trim() || isExtracting}
+              title={!isLlamaAvailable ? 'Llama model not available. Please ensure Ollama is running.' : `Generate with local Llama model (${llamaModel})`}
+            >
+              {isCheckingLlama ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Checking...
+                </>
+              ) : isProcessing && userStoryResult?.model === 'llama' ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Generating...
+                </>
+              ) : (
+                <>
+                  <Cpu className="w-4 h-4 mr-2" />
+                  {isLlamaAvailable && llamaModel ? (
+                    <span className="flex flex-col items-start">
+                      <span>Llama Local</span>
+                      <span className="text-xs opacity-80">({llamaModel})</span>
+                    </span>
+                  ) : (
+                    `Llama (Offline)`
+                  )}
+                </>
+              )}
+            </Button>
+          </div>
+          
+          {isLlamaAvailable && llamaModel && (
+            <div className="text-xs text-gray-600 mt-2 p-2 bg-green-50 border border-green-200 rounded flex items-center">
+              <CheckCircle className="w-4 h-4 mr-2 text-green-600" />
+              <span>Llama model <strong>{llamaModel}</strong> is ready on your local machine</span>
+            </div>
           )}
-        </Button>
+          
+          {!isLlamaAvailable && !isCheckingLlama && (
+            <div className="text-xs text-gray-500 mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded">
+              💡 Tip: To use the local Llama model, install and run <a href="https://ollama.ai" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Ollama</a> on your machine.
+            </div>
+          )}
+        </div>
       </Card>
 
       {/* Error Display */}
@@ -417,6 +540,13 @@ Make sure each user story follows the standard format and is relevant to the req
                 </h3>
                 <p className="text-sm text-gray-500">
                   {userStoryResult.timestamp?.toLocaleString?.() || 'Processing...'}
+                  {userStoryResult.model && (
+                    <span className="ml-2">
+                      • Model: <span className="font-medium capitalize">{userStoryResult.model}</span>
+                      {userStoryResult.model === 'gemini' && ' ✨'}
+                      {userStoryResult.model === 'llama' && ' 🦙'}
+                    </span>
+                  )}
                 </p>
               </div>
             </div>

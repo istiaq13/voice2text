@@ -1,38 +1,22 @@
 
-import { GoogleGenerativeAI } from '@google/generative-ai';
-
-// Use the API key directly
-const genAI = new GoogleGenerativeAI('AIzaSyBl3DxNKn5MMo7ZXFs4qnTkC69Tzc_6y4w');
-
-
+// Client-side function to transcribe audio via API route
 export async function transcribeAudio(audioFile: File): Promise<string> {
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const formData = new FormData();
+    formData.append('audio', audioFile);
 
-    // Convert file to base64 using FileReader (browser compatible)
-    const base64 = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const result = reader.result as string;
-        // Remove the data:...;base64, part
-        const base64String = result.split(',')[1];
-        resolve(base64String);
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(audioFile);
+    const response = await fetch('/api/transcribe', {
+      method: 'POST',
+      body: formData,
     });
 
-    const result = await model.generateContent([
-      {
-        inlineData: {
-          data: base64,
-          mimeType: audioFile.type
-        }
-      },
-      'Please transcribe this audio or video file and return only the text content. Extract all spoken words accurately.'
-    ]);
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to transcribe audio');
+    }
 
-    return result.response.text();
+    const { transcription } = await response.json();
+    return transcription;
   } catch (error) {
     console.error('Error transcribing audio:', error);
     throw new Error('Failed to transcribe audio');
