@@ -2,23 +2,44 @@
 
 import React, { useState, useCallback, useEffect } from 'react';
 import { useDropzone, FileRejection } from 'react-dropzone';
-import { Upload, FileText, FileAudio, Loader2, CheckCircle, AlertCircle, Download, X, Plus, Sparkles, Cpu } from 'lucide-react';
+import { Upload, FileText, FileAudio, Loader2, CheckCircle, AlertCircle, Download, X, Plus, Sparkles, Cpu, Tag, Mic, Moon, Sun } from 'lucide-react';
 import { Button } from '@/components/core/button';
 import { Card } from '@/components/core/layout';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Input, Textarea } from '@/components/core/form';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/core/layout';
-import { softwareKeywords } from '@/lib/keywords';
+import { Badge } from '@/components/ui/badge';
 import { transcribeAudio } from '@/lib/gemini';
+import { useTheme } from '@/contexts/ThemeContext';
 import type { UserStoryResult, AIModel } from '@/types';
 
+// Enhanced keyword configuration with categories
+const KEYWORD_CATEGORIES = {
+  'E-commerce': ['Shopping Cart', 'Payment', 'Checkout', 'Product Catalog', 'Inventory', 'Order Management', 'Shipping'],
+  'Authentication': ['Login', 'Registration', 'Password Reset', 'OAuth', 'Two-Factor Auth', 'Session Management', 'User Roles'],
+  'Social Media': ['Posts', 'Comments', 'Likes', 'Shares', 'Follow', 'Messaging', 'Notifications', 'Profile'],
+  'Analytics': ['Dashboard', 'Reports', 'Charts', 'Metrics', 'KPIs', 'Data Export', 'Real-time Updates'],
+  'Project Management': ['Tasks', 'Projects', 'Teams', 'Deadlines', 'Milestones', 'Kanban Board', 'Time Tracking'],
+  'Healthcare': ['Appointments', 'Patients', 'Medical Records', 'Prescriptions', 'Diagnosis', 'Billing', 'Insurance'],
+  'Education': ['Courses', 'Students', 'Assignments', 'Grades', 'Exams', 'Enrollment', 'Certifications'],
+  'Communication': ['Chat', 'Video Call', 'Email', 'SMS', 'Push Notifications', 'File Sharing', 'Screen Sharing'],
+  'AI/ML': ['Machine Learning', 'Natural Language', 'Computer Vision', 'Predictions', 'Training', 'Model Deployment'],
+  'Mobile': ['iOS', 'Android', 'Push Notifications', 'Offline Mode', 'Camera', 'GPS', 'Biometrics']
+};
+
+// Flatten all keywords for search
+const ALL_KEYWORDS = Object.values(KEYWORD_CATEGORIES).flat();
+
 export default function AudioUploader() {
+  const { theme, toggleTheme } = useTheme();
   const [isProcessing, setIsProcessing] = useState(false);
   const [userStoryResult, setUserStoryResult] = useState<UserStoryResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [requirements, setRequirements] = useState('');
   const [selectedKeywords, setSelectedKeywords] = useState<string[]>([]);
   const [customKeyword, setCustomKeyword] = useState('');
-  const [showKeywordInput, setShowKeywordInput] = useState(false);
+  const [keywordSearch, setKeywordSearch] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<string>('All');
+  const [suggestedKeywords, setSuggestedKeywords] = useState<string[]>([]);
   const [numStories, setNumStories] = useState<number>(5);
   const [inputMethod, setInputMethod] = useState<'text' | 'file'>('text');
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
@@ -26,6 +47,19 @@ export default function AudioUploader() {
   const [isLlamaAvailable, setIsLlamaAvailable] = useState(false);
   const [isCheckingLlama, setIsCheckingLlama] = useState(true);
   const [llamaModel, setLlamaModel] = useState<string>('');
+
+  // Maximum keywords limit
+  const MAX_KEYWORDS = 10;
+
+  // Auto-suggest keywords based on requirements text
+  useEffect(() => {
+    if (requirements.length > 50) {
+      const suggested = autoSuggestKeywords(requirements);
+      setSuggestedKeywords(suggested);
+    } else {
+      setSuggestedKeywords([]);
+    }
+  }, [requirements]);
 
   // Check Llama availability on component mount
   useEffect(() => {
@@ -48,23 +82,92 @@ export default function AudioUploader() {
     checkLlamaAvailability();
   }, []);
 
-  const handleKeywordSelect = (keyword: string) => {
-    if (!selectedKeywords.includes(keyword)) {
-      setSelectedKeywords([...selectedKeywords, keyword]);
-    }
-  };
+  // Auto-suggest keywords based on text analysis
+  function autoSuggestKeywords(text: string): string[] {
+    const textLower = text.toLowerCase();
+    const suggestions: string[] = [];
 
-  const handleKeywordRemove = (keyword: string) => {
-    setSelectedKeywords(selectedKeywords.filter(k => k !== keyword));
-  };
+    ALL_KEYWORDS.forEach(keyword => {
+      if (textLower.includes(keyword.toLowerCase()) && 
+          !selectedKeywords.includes(keyword)) {
+        suggestions.push(keyword);
+      }
+    });
 
-  const handleCustomKeywordAdd = () => {
-    if (customKeyword.trim() && !selectedKeywords.includes(customKeyword.trim())) {
-      setSelectedKeywords([...selectedKeywords, customKeyword.trim()]);
-      setCustomKeyword('');
-      setShowKeywordInput(false);
+    // Return top 5 suggestions
+    return suggestions.slice(0, 5);
+  }
+
+  // Add keyword with validation
+  function addKeyword(keyword: string) {
+    const trimmedKeyword = keyword.trim();
+    
+    // Validation
+    if (!trimmedKeyword) return;
+    
+    if (selectedKeywords.length >= MAX_KEYWORDS) {
+      setError(`Maximum ${MAX_KEYWORDS} keywords allowed`);
+      setTimeout(() => setError(''), 3000);
+      return;
     }
-  };
+
+    if (selectedKeywords.includes(trimmedKeyword)) {
+      setError('Keyword already added');
+      setTimeout(() => setError(''), 3000);
+      return;
+    }
+
+    if (trimmedKeyword.length > 50) {
+      setError('Keyword too long (max 50 characters)');
+      setTimeout(() => setError(''), 3000);
+      return;
+    }
+
+    setSelectedKeywords(prev => [...prev, trimmedKeyword]);
+    setCustomKeyword('');
+  }
+
+  // Remove keyword
+  function removeKeyword(keyword: string) {
+    setSelectedKeywords(prev => prev.filter(k => k !== keyword));
+  }
+
+  // Toggle keyword
+  function toggleKeyword(keyword: string) {
+    if (selectedKeywords.includes(keyword)) {
+      removeKeyword(keyword);
+    } else {
+      addKeyword(keyword);
+    }
+  }
+
+  // Clear all keywords
+  function clearAllKeywords() {
+    setSelectedKeywords([]);
+  }
+
+  // Get filtered keywords based on search and category
+  function getFilteredKeywords(): string[] {
+    let keywords: string[] = [];
+
+    if (selectedCategory === 'All') {
+      keywords = ALL_KEYWORDS;
+    } else {
+      keywords = KEYWORD_CATEGORIES[selectedCategory as keyof typeof KEYWORD_CATEGORIES] || [];
+    }
+
+    if (keywordSearch.trim()) {
+      keywords = keywords.filter(k => 
+        k.toLowerCase().includes(keywordSearch.toLowerCase())
+      );
+    }
+
+    return keywords;
+  }
+
+  // Legacy functions for compatibility (now use the new functions above)
+  const handleKeywordSelect = (keyword: string) => addKeyword(keyword);
+  const handleKeywordRemove = (keyword: string) => removeKeyword(keyword);
 
   const onDrop = useCallback(async (acceptedFiles: File[], fileRejections: FileRejection[]) => {
     // Handle file rejections
@@ -73,7 +176,9 @@ export default function AudioUploader() {
       if (rejection.errors[0]?.code === 'too-many-files') {
         setError('Please upload only one file at a time.');
       } else if (rejection.errors[0]?.code === 'file-invalid-type') {
-        setError('Invalid file type. Please upload a text (.txt), audio (.mp3, .wav, .m4a), or video file (.mp4, .mov).');
+        setError('Invalid file type. Please upload a supported file: PDF, Word, Text, Markdown, Audio, or Video.');
+      } else if (rejection.errors[0]?.code === 'file-too-large') {
+        setError('File is too large. Maximum size is 100MB.');
       } else {
         setError('File upload failed. Please try again.');
       }
@@ -83,49 +188,41 @@ export default function AudioUploader() {
     const file = acceptedFiles[0];
     if (!file) return;
 
-    // Validate file size (max 25MB for audio/video)
-    const maxSize = 25 * 1024 * 1024; // 25MB
-    if (file.size > maxSize) {
-      setError(`File is too large (${(file.size / 1024 / 1024).toFixed(2)}MB). Maximum size is 25MB.`);
-      return;
-    }
-
     setUploadedFile(file);
     setError(null);
+    setIsExtracting(true);
 
     try {
-      // If it's a text file, read it directly
-      if (file.type === 'text/plain') {
-        const text = await file.text();
-        if (!text.trim()) {
-          setError('The text file is empty. Please provide a file with content.');
-          return;
-        }
-        setRequirements(text);
-      } 
-      // If it's an audio/video file, extract text using Gemini
-      else if (file.type.startsWith('audio/') || file.type.startsWith('video/')) {
-        setIsExtracting(true);
-        try {
-          const extractedText = await transcribeAudio(file);
-          if (!extractedText.trim()) {
-            setError('No speech detected in the audio/video file. Please try another file.');
-            return;
-          }
-          setRequirements(extractedText);
-        } catch (err) {
-          console.error('Transcription error:', err);
-          const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
-          setError(`Failed to transcribe audio: ${errorMessage}. Please ensure the file contains clear speech and try again.`);
-        } finally {
-          setIsExtracting(false);
-        }
-      } else {
-        setError('Unsupported file type. Please upload a text, audio, or video file.');
+      // Use the unified extract-text API for all file types
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('model', 'gemini'); // Default to Gemini for audio/video
+
+      const response = await fetch('/api/extract-text', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to extract text from file');
       }
+
+      const data = await response.json();
+      
+      if (!data.text || !data.text.trim()) {
+        setError('No text was extracted from the file. The file might be empty or corrupted.');
+        return;
+      }
+
+      setRequirements(data.text);
+      console.log(`✅ Extracted ${data.characterCount} characters using ${data.method}`);
+      
     } catch (err) {
-      console.error('File processing error:', err);
-      setError('Failed to process file. Please try again.');
+      console.error('File extraction error:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
+      setError(errorMessage);
+    } finally {
       setIsExtracting(false);
     }
   }, []);
@@ -133,11 +230,18 @@ export default function AudioUploader() {
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     accept: {
+      // Documents
+      'application/pdf': ['.pdf'],
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
       'text/plain': ['.txt'],
+      'text/markdown': ['.md'],
+      // Audio
       'audio/*': ['.mp3', '.wav', '.m4a', '.ogg', '.webm'],
+      // Video
       'video/*': ['.mp4', '.mov', '.avi', '.webm']
     },
     maxFiles: 1,
+    maxSize: 100 * 1024 * 1024, // 100MB
     disabled: isProcessing || isExtracting
   });
 
@@ -245,12 +349,25 @@ Make sure each user story follows the standard format and is relevant to the req
   return (
     <div className="max-w-4xl mx-auto p-6 space-y-8">
       {/* Header */}
-      <div className="text-center space-y-4">
-        <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-100 rounded-full mb-4">
-          <FileText className="w-8 h-8 text-blue-600" />
+      <div className="text-center space-y-4 relative">
+        {/* Theme Toggle Button - Absolute positioned in top-right */}
+        <button
+          onClick={toggleTheme}
+          className="absolute top-0 right-0 p-2 rounded-lg bg-white dark:bg-gray-800 shadow-md hover:shadow-lg transition-all duration-200 border border-gray-200 dark:border-gray-700"
+          aria-label="Toggle theme"
+        >
+          {theme === 'dark' ? (
+            <Sun className="w-5 h-5 text-yellow-500" />
+          ) : (
+            <Moon className="w-5 h-5 text-gray-700" />
+          )}
+        </button>
+
+        <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-100 dark:bg-blue-900 rounded-full mb-4">
+          <FileText className="w-8 h-8 text-blue-600 dark:text-blue-400" />
         </div>
-        <h1 className="text-4xl font-bold text-gray-900">User Story Generator</h1>
-        <p className="text-lg text-gray-600 max-w-2xl mx-auto">
+        <h1 className="text-4xl font-bold text-gray-900 dark:text-white">User Story Generator</h1>
+        <p className="text-lg text-gray-600 dark:text-gray-300 max-w-2xl mx-auto">
           Generate user stories from your software requirements using AI-powered analysis
         </p>
       </div>
@@ -264,7 +381,7 @@ Make sure each user story follows the standard format and is relevant to the req
           </TabsList>
           
           <TabsContent value="text" className="space-y-4">
-            <h3 className="text-lg font-semibold text-gray-900">Enter Software Requirements</h3>
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Enter Software Requirements</h3>
             <Textarea
               placeholder="Enter your software requirements here... (e.g., I need a web application for managing customer orders with user authentication, payment processing, and real-time notifications)"
               value={requirements}
@@ -275,13 +392,13 @@ Make sure each user story follows the standard format and is relevant to the req
           </TabsContent>
           
           <TabsContent value="file" className="space-y-4">
-            <h3 className="text-lg font-semibold text-gray-900">Upload Requirements File</h3>
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Upload Requirements File</h3>
             <div
               {...getRootProps()}
               className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer
                 ${isDragActive 
-                  ? 'border-blue-400 bg-blue-50' 
-                  : 'border-gray-300 hover:border-blue-400 hover:bg-gray-50'
+                  ? 'border-blue-400 bg-blue-50 dark:border-blue-500 dark:bg-blue-900/20' 
+                  : 'border-gray-300 hover:border-blue-400 hover:bg-gray-50 dark:border-gray-600 dark:hover:border-blue-500 dark:hover:bg-gray-800'
                 }
                 ${isProcessing || isExtracting ? 'opacity-50 cursor-not-allowed' : ''}
               `}
@@ -292,8 +409,8 @@ Make sure each user story follows the standard format and is relevant to the req
                 <div className="space-y-4">
                   <Loader2 className="w-8 h-8 text-blue-600 mx-auto animate-spin" />
                   <div className="space-y-2">
-                    <h4 className="text-md font-semibold text-gray-900">Extracting Text...</h4>
-                    <p className="text-gray-600">Please wait while we extract text from your media file</p>
+                    <h4 className="text-md font-semibold text-gray-900 dark:text-white">Extracting Text...</h4>
+                    <p className="text-gray-600 dark:text-gray-300">Please wait while we extract text from your media file</p>
                   </div>
                 </div>
               ) : (
@@ -303,14 +420,20 @@ Make sure each user story follows the standard format and is relevant to the req
                     <FileAudio className="w-8 h-8 text-gray-400" />
                   </div>
                   <div className="space-y-2">
-                    <h4 className="text-md font-semibold text-gray-900">
+                    <h4 className="text-md font-semibold text-gray-900 dark:text-white">
                       {isDragActive ? 'Drop your file here' : 'Upload Requirements File'}
                     </h4>
-                    <p className="text-gray-600">
-                      Upload a text file (.txt) or audio/video file (.mp3, .wav, .mp4, etc.)
+                    <p className="text-gray-600 dark:text-gray-300">
+                      Documents: PDF, Word (.docx), Text (.txt), Markdown (.md)
                     </p>
-                    <p className="text-sm text-gray-500">
-                      Text files are read directly. Audio/video files are transcribed using AI.
+                    <p className="text-gray-600 dark:text-gray-300">
+                      Audio: MP3, WAV, M4A, OGG, WebM
+                    </p>
+                    <p className="text-gray-600 dark:text-gray-300">
+                      Video: MP4, MOV, AVI, WebM
+                    </p>
+                    <p className="text-sm text-gray-500 mt-2">
+                      Documents → Text extraction • Audio/Video → AI transcription
                     </p>
                   </div>
                   <Button variant="outline" className="mt-4">
@@ -321,7 +444,7 @@ Make sure each user story follows the standard format and is relevant to the req
             </div>
             
             {uploadedFile && (
-              <div className="flex items-center space-x-2 text-sm text-gray-600">
+              <div className="flex items-center space-x-2 text-sm text-gray-600 dark:text-gray-300">
                 <FileText className="w-4 h-4" />
                 <span>Uploaded: {uploadedFile.name}</span>
               </div>
@@ -329,9 +452,9 @@ Make sure each user story follows the standard format and is relevant to the req
             
             {requirements && (
               <div className="space-y-2">
-                <h4 className="text-md font-medium text-gray-900">Extracted Requirements:</h4>
-                <div className="bg-gray-50 rounded-lg p-4 border max-h-40 overflow-y-auto">
-                  <p className="text-gray-800 text-sm whitespace-pre-wrap">
+                <h4 className="text-md font-medium text-gray-900 dark:text-white">Extracted Requirements:</h4>
+                <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border dark:border-gray-700 max-h-40 overflow-y-auto">
+                  <p className="text-gray-800 dark:text-gray-200 text-sm whitespace-pre-wrap">
                     {requirements.substring(0, 500)}{requirements.length > 500 ? '...' : ''}
                   </p>
                 </div>
@@ -342,13 +465,13 @@ Make sure each user story follows the standard format and is relevant to the req
       </Card>
 
       {/* Configuration */}
-      <Card className="p-6 space-y-4">
-        <h3 className="text-lg font-semibold text-gray-900">Configuration</h3>
+      <Card className="p-6 space-y-6">
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Configuration</h3>
         
-        <div className="grid md:grid-cols-2 gap-6">
-          {/* Number of Stories */}
+        <div className="grid md:grid-cols-4 gap-6">
+          {/* Number of Stories - Takes 1 column */}
           <div className="space-y-2">
-            <label className="text-sm font-medium text-gray-700">Number of User Stories</label>
+            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Number of User Stories</label>
             <Select value={numStories.toString()} onValueChange={(value: string) => setNumStories(parseInt(value))}>
               <SelectTrigger>
                 <SelectValue />
@@ -363,90 +486,164 @@ Make sure each user story follows the standard format and is relevant to the req
             </Select>
           </div>
 
-          {/* Keywords Selection */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-gray-700">Select Keywords</label>
-            <Select onValueChange={handleKeywordSelect} disabled={isProcessing}>
-              <SelectTrigger>
-                <SelectValue placeholder="Choose relevant keywords..." />
-              </SelectTrigger>
-              <SelectContent className="max-h-48">
-                {softwareKeywords
-                  .filter(keyword => !selectedKeywords.includes(keyword))
-                  .map((keyword) => (
-                  <SelectItem key={keyword} value={keyword}>
-                    {keyword}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-
-        {/* Custom Keyword Input */}
-        <div className="flex items-center justify-between">
-          <span className="text-sm font-medium text-gray-700">Selected Keywords:</span>
-          <Button
-            onClick={() => setShowKeywordInput(!showKeywordInput)}
-            variant="outline"
-            size="sm"
-            disabled={isProcessing}
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            Add Custom
-          </Button>
-        </div>
-        
-        {showKeywordInput && (
-          <div className="flex gap-2">
-            <Input
-              placeholder="Enter custom keyword"
-              value={customKeyword}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCustomKeyword(e.target.value)}
-              onKeyPress={(e: React.KeyboardEvent<HTMLInputElement>) => e.key === 'Enter' && handleCustomKeywordAdd()}
-              className="flex-1"
-            />
-            <Button onClick={handleCustomKeywordAdd} size="sm">
-              Add
-            </Button>
-          </div>
-        )}
-
-        {/* Keywords Display */}
-        <div className="min-h-16 p-4 border-2 border-dashed border-gray-300 rounded-lg bg-gray-50">
-          {selectedKeywords.length === 0 ? (
-            <p className="text-gray-500 text-sm">No keywords selected. Choose from dropdown or add custom keywords.</p>
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              {selectedKeywords.map((keyword) => (
-                <span
-                  key={keyword}
-                  className="inline-flex items-center bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm"
+          {/* Enhanced Keywords Section - Takes 3 columns */}
+          <div className="md:col-span-3 space-y-4">
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-medium flex items-center gap-2">
+                <Tag className="w-4 h-4" />
+                Keywords ({selectedKeywords.length}/{MAX_KEYWORDS})
+              </label>
+              {selectedKeywords.length > 0 && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={clearAllKeywords}
+                  className="text-xs"
                 >
-                  {keyword}
-                  <button
-                    onClick={() => handleKeywordRemove(keyword)}
-                    className="ml-2 text-blue-600 hover:text-blue-800"
-                    disabled={isProcessing}
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                </span>
-              ))}
+                  Clear All
+                </Button>
+              )}
             </div>
-          )}
+
+            {/* Selected Keywords Display */}
+            {selectedKeywords.length > 0 && (
+              <div className="flex flex-wrap gap-2 p-3 bg-blue-50 dark:bg-blue-950 rounded-lg border border-blue-200 dark:border-blue-800">
+                {selectedKeywords.map((keyword) => (
+                  <Badge
+                    key={keyword}
+                    variant="default"
+                    className="px-3 py-1 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 cursor-pointer"
+                    onClick={() => removeKeyword(keyword)}
+                  >
+                    {keyword}
+                    <X className="w-3 h-3 ml-1" />
+                  </Badge>
+                ))}
+              </div>
+            )}
+
+            {/* AI Suggestions */}
+            {suggestedKeywords.length > 0 && (
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-purple-600 dark:text-purple-400 flex items-center gap-1">
+                  <Sparkles className="w-3 h-3" />
+                  AI Suggested Keywords (from your requirements)
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {suggestedKeywords.map((keyword) => (
+                    <Badge
+                      key={keyword}
+                      variant="outline"
+                      className="cursor-pointer hover:bg-purple-100 dark:hover:bg-purple-950 border-purple-300 dark:border-purple-700"
+                      onClick={() => addKeyword(keyword)}
+                    >
+                      <Plus className="w-3 h-3 mr-1" />
+                      {keyword}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Category Filter */}
+            <div className="space-y-2">
+              <label className="text-xs font-medium">Browse by Category:</label>
+              <div className="flex flex-wrap gap-2">
+                <Badge
+                  variant={selectedCategory === 'All' ? 'default' : 'outline'}
+                  className="cursor-pointer"
+                  onClick={() => setSelectedCategory('All')}
+                >
+                  All Keywords
+                </Badge>
+                {Object.keys(KEYWORD_CATEGORIES).map((category) => (
+                  <Badge
+                    key={category}
+                    variant={selectedCategory === category ? 'default' : 'outline'}
+                    className="cursor-pointer"
+                    onClick={() => setSelectedCategory(category)}
+                  >
+                    {category}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+
+            {/* Search Keywords */}
+            <div className="relative">
+              <Input
+                type="text"
+                placeholder="Search keywords..."
+                value={keywordSearch}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setKeywordSearch(e.target.value)}
+                className="text-sm"
+              />
+            </div>
+
+            {/* Predefined Keywords Grid */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 max-h-48 overflow-y-auto p-2 bg-gray-50 dark:bg-gray-800 rounded-lg border dark:border-gray-700">
+              {getFilteredKeywords().map((keyword) => {
+                const isSelected = selectedKeywords.includes(keyword);
+                return (
+                  <Badge
+                    key={keyword}
+                    variant={isSelected ? 'default' : 'outline'}
+                    className={`cursor-pointer justify-center text-center ${
+                      isSelected 
+                        ? 'bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600' 
+                        : 'hover:bg-gray-100 dark:hover:bg-gray-700'
+                    }`}
+                    onClick={() => toggleKeyword(keyword)}
+                  >
+                    {keyword}
+                  </Badge>
+                );
+              })}
+            </div>
+
+            {/* Custom Keyword Input */}
+            <div className="flex gap-2">
+              <Input
+                type="text"
+                placeholder="Add custom keyword..."
+                value={customKeyword}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCustomKeyword(e.target.value)}
+                onKeyPress={(e: React.KeyboardEvent<HTMLInputElement>) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addKeyword(customKeyword);
+                  }
+                }}
+                className="flex-1 text-sm"
+                maxLength={50}
+              />
+              <Button
+                type="button"
+                onClick={() => addKeyword(customKeyword)}
+                disabled={!customKeyword.trim() || selectedKeywords.length >= MAX_KEYWORDS}
+                size="sm"
+              >
+                <Plus className="w-4 h-4" />
+              </Button>
+            </div>
+
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Select up to {MAX_KEYWORDS} keywords to focus the AI on specific aspects of your requirements
+            </p>
+          </div>
         </div>
 
         {/* Generate Buttons */}
         <div className="space-y-3">
-          <div className="text-sm font-medium text-gray-700 mb-2">
+          <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
             Choose AI Model:
           </div>
           <div className="grid grid-cols-2 gap-4">
             {/* Gemini Button */}
             <Button 
               onClick={() => generateUserStories('gemini')} 
-              className="w-full bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700"
+              className="w-full bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 dark:from-blue-400 dark:to-purple-500 dark:hover:from-blue-500 dark:hover:to-purple-600 text-white font-medium"
               disabled={isProcessing || !requirements.trim() || isExtracting}
             >
               {isProcessing && userStoryResult?.model === 'gemini' ? (
@@ -465,7 +662,7 @@ Make sure each user story follows the standard format and is relevant to the req
             {/* Llama Button */}
             <Button 
               onClick={() => generateUserStories('llama')} 
-              className="w-full bg-gradient-to-r from-green-500 to-teal-600 hover:from-green-600 hover:to-teal-700"
+              className="w-full bg-gradient-to-r from-green-500 to-teal-600 hover:from-green-600 hover:to-teal-700 dark:from-green-400 dark:to-teal-500 dark:hover:from-green-500 dark:hover:to-teal-600 text-white font-medium"
               disabled={!isLlamaAvailable || isProcessing || !requirements.trim() || isExtracting}
               title={!isLlamaAvailable ? 'Llama model not available. Please ensure Ollama is running.' : `Generate with local Llama model (${llamaModel})`}
             >
@@ -496,15 +693,15 @@ Make sure each user story follows the standard format and is relevant to the req
           </div>
           
           {isLlamaAvailable && llamaModel && (
-            <div className="text-xs text-gray-600 mt-2 p-2 bg-green-50 border border-green-200 rounded flex items-center">
-              <CheckCircle className="w-4 h-4 mr-2 text-green-600" />
+            <div className="text-xs text-gray-600 dark:text-gray-300 mt-2 p-2 bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded flex items-center">
+              <CheckCircle className="w-4 h-4 mr-2 text-green-600 dark:text-green-400" />
               <span>Llama model <strong>{llamaModel}</strong> is ready on your local machine</span>
             </div>
           )}
           
           {!isLlamaAvailable && !isCheckingLlama && (
-            <div className="text-xs text-gray-500 mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded">
-              💡 Tip: To use the local Llama model, install and run <a href="https://ollama.ai" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Ollama</a> on your machine.
+            <div className="text-xs text-gray-500 dark:text-gray-400 mt-2 p-2 bg-yellow-50 dark:bg-yellow-950 border border-yellow-200 dark:border-yellow-800 rounded">
+              Tip: To use the local Llama model, install and run <a href="https://ollama.ai" target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline">Ollama</a> on your machine.
             </div>
           )}
         </div>
@@ -512,10 +709,10 @@ Make sure each user story follows the standard format and is relevant to the req
 
       {/* Error Display */}
       {error && (
-        <Card className="p-6 border-red-200 bg-red-50">
+        <Card className="p-6 border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20">
           <div className="flex items-center space-x-3">
-            <AlertCircle className="w-5 h-5 text-red-600" />
-            <p className="text-red-700">{error}</p>
+            <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400" />
+            <p className="text-red-700 dark:text-red-300">{error}</p>
           </div>
         </Card>
       )}
@@ -535,16 +732,14 @@ Make sure each user story follows the standard format and is relevant to the req
                 <AlertCircle className="w-5 h-5 text-red-600" />
               )}
               <div>
-                <h3 className="text-lg font-semibold text-gray-900">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
                   Generated {userStoryResult.numStories} User Stories
                 </h3>
-                <p className="text-sm text-gray-500">
+                <p className="text-sm text-gray-500 dark:text-gray-400">
                   {userStoryResult.timestamp?.toLocaleString?.() || 'Processing...'}
                   {userStoryResult.model && (
                     <span className="ml-2">
                       • Model: <span className="font-medium capitalize">{userStoryResult.model}</span>
-                      {userStoryResult.model === 'gemini' && ' ✨'}
-                      {userStoryResult.model === 'llama' && ' 🦙'}
                     </span>
                   )}
                 </p>
@@ -561,8 +756,8 @@ Make sure each user story follows the standard format and is relevant to the req
 
           {userStoryResult.status === 'completed' && userStoryResult.userStories && (
             <div className="space-y-4">
-              <div className="bg-gray-50 rounded-lg p-4 border">
-                <p className="text-gray-800 whitespace-pre-wrap leading-relaxed">
+              <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border dark:border-gray-700">
+                <p className="text-gray-800 dark:text-gray-200 whitespace-pre-wrap leading-relaxed">
                   {userStoryResult.userStories}
                 </p>
               </div>
@@ -572,29 +767,29 @@ Make sure each user story follows the standard format and is relevant to the req
       )}
 
       {/* Instructions */}
-      <Card className="p-6 bg-blue-50 border-blue-200">
+      <Card className="p-6 bg-blue-50 dark:bg-blue-950 border-blue-200 dark:border-blue-800">
         <div className="space-y-4">
-          <h3 className="text-lg font-semibold text-blue-900">How it works:</h3>
+          <h3 className="text-lg font-semibold text-blue-900 dark:text-blue-100">How it works:</h3>
           <div className="grid md:grid-cols-3 gap-4">
             <div className="flex items-start space-x-3">
-              <div className="w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-sm font-semibold">1</div>
+              <div className="text-2xl font-bold text-gray-700 dark:text-gray-300">1</div>
               <div>
-                <h4 className="font-medium text-blue-900">Input Requirements</h4>
-                <p className="text-blue-700 text-sm">Enter text manually or upload a text/media file with your software requirements</p>
+                <h4 className="font-medium text-blue-900 dark:text-blue-200">Input Requirements</h4>
+                <p className="text-blue-700 dark:text-blue-300 text-sm">Enter text manually or upload a text/media file with your software requirements</p>
               </div>
             </div>
             <div className="flex items-start space-x-3">
-              <div className="w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-sm font-semibold">2</div>
+              <div className="text-2xl font-bold text-gray-700 dark:text-gray-300">2</div>
               <div>
-                <h4 className="font-medium text-blue-900">Configure & Generate</h4>
-                <p className="text-blue-700 text-sm">Select keywords, choose number of stories, and let AI generate user stories</p>
+                <h4 className="font-medium text-blue-900 dark:text-blue-200">Configure & Generate</h4>
+                <p className="text-blue-700 dark:text-blue-300 text-sm">Select keywords, choose number of stories, and let AI generate user stories</p>
               </div>
             </div>
             <div className="flex items-start space-x-3">
-              <div className="w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center text-sm font-semibold">3</div>
+              <div className="text-2xl font-bold text-gray-700 dark:text-gray-300">3</div>
               <div>
-                <h4 className="font-medium text-blue-900">Download Results</h4>
-                <p className="text-blue-700 text-sm">Review and download your generated user stories as a text file</p>
+                <h4 className="font-medium text-blue-900 dark:text-blue-200">Download Results</h4>
+                <p className="text-blue-700 dark:text-blue-300 text-sm">Review and download your generated user stories as a text file</p>
               </div>
             </div>
           </div>
