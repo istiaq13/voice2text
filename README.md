@@ -14,13 +14,19 @@ Voice2Text is a modern web application that streamlines the software requirement
 
 ## Features
 
-- **Audio Transcription**: Convert audio recordings to text using Google's Gemini AI
+- **Multiple Input Methods**: Upload documents (PDF, Word, Text, Markdown) or media files (audio/video), or enter text directly
+- **Advanced Text Extraction**: Extract text from PDFs and Word documents using AI-powered analysis
+- **Audio & Video Transcription**: Convert audio and video recordings to text using Google's Gemini AI
 - **Dual AI Model Support**: Choose between cloud-based Gemini AI or local Llama models
-  - 🌐 **Gemini AI**: Fast, cloud-based, highly accurate
-  - 🦙 **Llama (Local)**: Privacy-focused, runs on your machine, no internet required
-- **Text Input Option**: Directly input requirements text if you already have it
-- **Keyword Selection**: Focus user stories on specific keywords or domains
+  - **Gemini AI**: Fast, cloud-based, highly accurate
+  - **Llama (Local)**: Privacy-focused, runs on your machine, no internet required
+- **Smart Keyword System**: 
+  - Browse keywords by category (E-commerce, Authentication, Healthcare, etc.)
+  - AI-suggested keywords based on your requirements
+  - Add custom keywords
+  - Select up to 10 keywords to focus your user stories
 - **AI-Powered User Story Generation**: Automatically create user stories in standard format
+- **Dark Mode Support**: Full dark mode with elegant theme switching
 - **Responsive Design**: Works seamlessly on desktop and mobile devices
 - **Drag & Drop Interface**: Easy file upload with visual feedback
 - **Download Results**: Save generated user stories as text files
@@ -33,13 +39,13 @@ Voice2Text is a modern web application that streamlines the software requirement
 
 ## Supported File Formats
 
-| Audio | Video | Text |
-|-------|-------|------|
-| MP3   | MP4   | TXT  |
-| WAV   | MOV   |      |
-| M4A   | AVI   |      |
-| OGG   | WEBM  |      |
-| WEBM  |       |      |
+| Documents | Audio | Video |
+|-----------|-------|-------|
+| PDF       | MP3   | MP4   |
+| DOCX      | WAV   | MOV   |
+| TXT       | M4A   | AVI   |
+| MD        | OGG   | WEBM  |
+|           | WEBM  |       |
 
 ## Quick Start
 
@@ -126,32 +132,38 @@ Voice2Text is a modern web application that streamlines the software requirement
 voice2text/
 ├── app/                      # Next.js app directory
 │   ├── api/                  # API routes
-│   │   └── generate-stories/ # User story generation endpoint
-│   │       └── route.ts      # API handler
-│   ├── globals.css           # Global styles
+│   │   ├── extract-text/     # Document/media text extraction endpoint
+│   │   ├── generate-stories/ # Gemini user story generation endpoint
+│   │   ├── generate-stories-llama/ # Llama user story generation endpoint
+│   │   ├── transcribe/       # Gemini audio transcription endpoint
+│   │   └── transcribe-llama/ # Llama audio transcription endpoint
+│   ├── globals.css           # Global styles with dark mode support
 │   ├── layout.tsx            # Root layout
 │   └── page.tsx              # Home page
 ├── components/               # React components
-│   ├── AudioUploader.tsx     # Main audio upload and processing component
-│   └── ui/                   # shadcn/ui components
-│       ├── button.tsx        # Button component
-│       ├── card.tsx          # Card component
-│       ├── input.tsx         # Input component
-│       ├── select.tsx        # Select component
-│       ├── textarea.tsx      # Textarea component
-│       ├── tabs.tsx          # Tabs component
-│       └── ... (other UI components)
+│   ├── AudioUploader.tsx     # Main component with file upload, keyword selection, and story generation
+│   ├── core/                 # Core UI components
+│   │   ├── button.tsx        # Button component
+│   │   ├── form.tsx          # Form components (Input, Select, Textarea)
+│   │   ├── layout.tsx        # Layout components (Card, Tabs)
+│   │   └── navigation.tsx    # Navigation components
+│   └── ui/                   # Additional UI components
+│       └── badge.tsx         # Badge component for keywords
+├── contexts/                 # React contexts
+│   └── ThemeContext.tsx      # Dark mode theme provider
 ├── hooks/                    # Custom React hooks
 │   └── use-toast.ts          # Toast notification hook
 ├── lib/                      # Utility functions and services
 │   ├── firebase.ts           # Firebase configuration
 │   ├── gemini.ts             # Google Gemini API integration
-│   ├── keywords.ts           # Predefined software keywords
+│   ├── keywords.ts           # Categorized software keywords
 │   └── utils.ts              # Helper utilities
+├── types/                    # TypeScript type definitions
+│   └── index.ts              # Shared types
 ├── .env.local                # Environment variables (create this)
 ├── next.config.js            # Next.js configuration
 ├── package.json              # Dependencies and scripts
-├── tailwind.config.ts        # Tailwind CSS configuration
+├── tailwind.config.ts        # Tailwind CSS configuration with dark mode
 └── tsconfig.json             # TypeScript configuration
 ```
 
@@ -172,27 +184,29 @@ voice2text/
 
 ## How It Works
 
-1. *Input*: Users can either upload an audio file or directly input text requirements
-2. *Transcription*: If an audio file is uploaded, it's sent to Gemini API for transcription
-3. *Keyword Selection*: Users select relevant keywords to focus the user story generation
-4. *Generation*: The system sends the requirements and keywords to Gemini API
-5. *Output*: Generated user stories are displayed and can be downloaded as a text file
+1. **Input Requirements**: Users can upload documents (PDF, Word, Text, Markdown), media files (audio/video), or directly input text requirements
+2. **Text Extraction**: Documents are processed to extract text; audio/video files are transcribed using Gemini AI
+3. **Keyword Selection**: Users select up to 10 relevant keywords from categorized options or add custom ones. AI suggests keywords based on the requirements
+4. **AI Model Selection**: Choose between Gemini AI (cloud-based) or Llama (local, privacy-focused)
+5. **Story Generation**: The system sends the requirements and keywords to the selected AI model to generate user stories
+6. **Output**: Generated user stories are displayed in standard format and can be downloaded as a text file
 
 ## Use Cases
 
-- *Product Managers*: Convert meeting recordings into actionable user stories
-- *Business Analysts*: Transform client requirements into structured development tasks
-- *Agile Teams*: Quickly generate user stories from verbal discussions
-- *UX Researchers*: Convert user interview recordings into requirements
+- **Product Managers**: Convert meeting recordings into actionable user stories, or upload requirement documents
+- **Business Analysts**: Transform client requirements (documents or recordings) into structured development tasks
+- **Agile Teams**: Quickly generate user stories from verbal discussions or written specifications
+- **UX Researchers**: Convert user interview recordings or notes into requirements
+- **Consultants**: Process client documents and generate structured user stories efficiently
 
 ## Contributing
 
 Contributions are welcome! Here's how you can help:
 
 1. Fork the repository
-2. Create a feature branch: git checkout -b feature/amazing-feature
-3. Commit your changes: git commit -m 'Add amazing feature'
-4. Push to the branch: git push origin feature/amazing-feature
+2. Create a feature branch: `git checkout -b feature/amazing-feature`
+3. Commit your changes: `git commit -m 'Add amazing feature'`
+4. Push to the branch: `git push origin feature/amazing-feature`
 5. Open a Pull Request
 
 Please make sure to update tests as appropriate and follow the code style.
@@ -208,5 +222,5 @@ If you have any questions or feedback, please open an issue or contact the proje
 ---
 
 <div align="center">
-  <p>Made with ❤ by the Voice2Text Team</p>
+  <p>Made by the Voice2Text Team</p>
 </div>
