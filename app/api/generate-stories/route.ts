@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { safeValidateStoryGenerationRequest } from '@/lib/validators';
+import { apiRateLimiter } from '@/lib/rate-limit';
 
 // Mark this route as dynamic
 export const dynamic = 'force-dynamic';
@@ -9,37 +11,40 @@ export const runtime = 'nodejs';
 const apiKey = process.env.GOOGLE_API_KEY;
 
 if (!apiKey) {
-  throw new Error('GOOGLE_API_KEY is not set in environment variables');
+  console.error('GOOGLE_API_KEY is not set in environment variables');
 }
 
-const genAI = new GoogleGenerativeAI(apiKey);
+const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null;
 
 export async function POST(req: NextRequest) {
   try {
+    // Apply rate limiting
+    const rateLimitResult = await apiRateLimiter(req);
+    if (rateLimitResult) {
+      return rateLimitResult;
+    }
+
+    // Check if API key is configured
+    if (!apiKey || !genAI) {
+      return NextResponse.json(
+        { error: 'API configuration error. Please contact the administrator.' },
+        { status: 500 }
+      );
+    }
+
     const body = await req.json();
-    const { prompt } = body;
-
-    // Validation
-    if (!prompt || typeof prompt !== 'string') {
+    
+    // Validate request using Zod schema
+    const validation = safeValidateStoryGenerationRequest(body);
+    
+    if (!validation.success || !validation.data) {
       return NextResponse.json(
-        { error: 'Valid prompt is required' }, 
+        { error: validation.error || 'Invalid request data' },
         { status: 400 }
       );
     }
 
-    if (prompt.trim().length < 20) {
-      return NextResponse.json(
-        { error: 'Prompt is too short. Please provide more detailed requirements.' },
-        { status: 400 }
-      );
-    }
-
-    if (prompt.length > 10000) {
-      return NextResponse.json(
-        { error: 'Prompt is too long. Please limit to 10,000 characters.' },
-        { status: 400 }
-      );
-    }
+    const { prompt } = validation.data;
 
     // Use gemini-2.5-flash - the current free tier model available as of Oct 2025
     // This model replaced gemini-pro for free tier users

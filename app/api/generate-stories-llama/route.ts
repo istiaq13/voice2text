@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { networkInterfaces } from 'os';
+import { safeValidateStoryGenerationRequest } from '@/lib/validators';
+import { apiRateLimiter } from '@/lib/rate-limit';
 
 // Mark this route as dynamic
 export const dynamic = 'force-dynamic';
@@ -73,30 +75,25 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    // Apply rate limiting
+    const rateLimitResult = await apiRateLimiter(req);
+    if (rateLimitResult) {
+      return rateLimitResult;
+    }
+
     const body = await req.json();
-    const { prompt } = body;
-
-    // Validation
-    if (!prompt || typeof prompt !== 'string') {
+    
+    // Validate request using Zod schema
+    const validation = safeValidateStoryGenerationRequest(body);
+    
+    if (!validation.success || !validation.data) {
       return NextResponse.json(
-        { error: 'Valid prompt is required' },
+        { error: validation.error || 'Invalid request data' },
         { status: 400 }
       );
     }
 
-    if (prompt.trim().length < 20) {
-      return NextResponse.json(
-        { error: 'Prompt is too short. Please provide more detailed requirements.' },
-        { status: 400 }
-      );
-    }
-
-    if (prompt.length > 10000) {
-      return NextResponse.json(
-        { error: 'Prompt is too long. Please limit to 10,000 characters.' },
-        { status: 400 }
-      );
-    }
+    const { prompt } = validation.data;
 
     // Check if Llama is available and get the working URL
     const llamaCheck = await checkLlamaAvailability();

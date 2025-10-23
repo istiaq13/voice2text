@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import mammoth from 'mammoth';
+import { safeValidateFileUpload } from '@/lib/validators';
+import { fileUploadRateLimiter } from '@/lib/rate-limit';
 
 // Mark this route as dynamic
 export const dynamic = 'force-dynamic';
@@ -142,29 +144,22 @@ async function transcribeAudioVideo(buffer: Buffer, mimeType: string): Promise<s
 
 export async function POST(req: NextRequest) {
   try {
+    // Apply rate limiting for file uploads
+    const rateLimitResult = await fileUploadRateLimiter(req);
+    if (rateLimitResult) {
+      return rateLimitResult;
+    }
+    
     const data = await req.formData();
     const file: File | null = data.get('file') as unknown as File;
     const model: string = data.get('model') as string || 'gemini'; // For audio/video transcription
 
-    // Validation
-    if (!file) {
+    // Validate file using Zod schema
+    const validation = safeValidateFileUpload(file);
+    
+    if (!validation.success || !validation.data) {
       return NextResponse.json(
-        { error: 'No file provided' },
-        { status: 400 }
-      );
-    }
-
-    if (file.size === 0) {
-      return NextResponse.json(
-        { error: 'File is empty. Please upload a valid file.' },
-        { status: 400 }
-      );
-    }
-
-    // 100MB limit
-    if (file.size > 100 * 1024 * 1024) {
-      return NextResponse.json(
-        { error: 'File size must be less than 100MB' },
+        { error: validation.error || 'Invalid file' },
         { status: 400 }
       );
     }

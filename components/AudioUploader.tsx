@@ -8,8 +8,10 @@ import { Card } from '@/components/core/layout';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Input, Textarea } from '@/components/core/form';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/core/layout';
 import { Badge } from '@/components/ui/badge';
+import { FileUploadSkeleton, UserStoryLoadingSkeleton } from '@/components/ui/skeleton';
 import { transcribeAudio } from '@/lib/gemini';
 import { useTheme } from '@/contexts/ThemeContext';
+import { safeValidateRequirements } from '@/lib/validators';
 import type { UserStoryResult, AIModel } from '@/types';
 
 // Enhanced keyword configuration with categories
@@ -246,19 +248,15 @@ export default function AudioUploader() {
   });
 
   const generateUserStories = async (model: AIModel = 'gemini') => {
-    // Validation
-    if (!requirements.trim()) {
-      setError('Please enter software requirements or upload a file.');
-      return;
-    }
+    // Validate using Zod schema
+    const validation = safeValidateRequirements({
+      requirements,
+      selectedKeywords,
+      numStories,
+    });
 
-    if (requirements.trim().length < 20) {
-      setError('Requirements are too short. Please provide more detailed requirements (at least 20 characters).');
-      return;
-    }
-
-    if (selectedKeywords.length === 0) {
-      setError('Please select at least one keyword to focus the user stories.');
+    if (!validation.success) {
+      setError(validation.error || 'Validation failed');
       return;
     }
 
@@ -407,10 +405,10 @@ Make sure each user story follows the standard format and is relevant to the req
               
               {isExtracting ? (
                 <div className="space-y-4">
-                  <Loader2 className="w-8 h-8 text-blue-600 mx-auto animate-spin" />
-                  <div className="space-y-2">
+                  <FileUploadSkeleton />
+                  <div className="text-center space-y-2">
                     <h4 className="text-md font-semibold text-gray-900 dark:text-white">Extracting Text...</h4>
-                    <p className="text-gray-600 dark:text-gray-300">Please wait while we extract text from your media file</p>
+                    <p className="text-gray-600 dark:text-gray-300">Please wait while we process your file</p>
                   </div>
                 </div>
               ) : (
@@ -720,48 +718,110 @@ Make sure each user story follows the standard format and is relevant to the req
       {/* User Stories Result */}
       {userStoryResult && (
         <Card className="p-6 space-y-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              {userStoryResult.status === 'completed' && (
-                <CheckCircle className="w-5 h-5 text-green-600" />
-              )}
-              {userStoryResult.status === 'processing' && (
-                <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
-              )}
-              {userStoryResult.status === 'error' && (
-                <AlertCircle className="w-5 h-5 text-red-600" />
-              )}
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-                  Generated {userStoryResult.numStories} User Stories
-                </h3>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  {userStoryResult.timestamp?.toLocaleString?.() || 'Processing...'}
-                  {userStoryResult.model && (
-                    <span className="ml-2">
-                      • Model: <span className="font-medium capitalize">{userStoryResult.model}</span>
-                    </span>
+          {userStoryResult.status === 'processing' ? (
+            <UserStoryLoadingSkeleton />
+          ) : (
+            <>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-3">
+                  {userStoryResult.status === 'completed' && (
+                    <CheckCircle className="w-5 h-5 text-green-600" />
                   )}
-                </p>
+                  {userStoryResult.status === 'error' && (
+                    <AlertCircle className="w-5 h-5 text-red-600" />
+                  )}
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                      Generated {userStoryResult.numStories} User Stories
+                    </h3>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      {userStoryResult.timestamp?.toLocaleString?.() || 'Processing...'}
+                      {userStoryResult.model && (
+                        <span className="ml-2">
+                          • Model: <span className="font-medium capitalize">{userStoryResult.model}</span>
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                </div>
+                
+                {userStoryResult.status === 'completed' && userStoryResult.userStories && (
+                  <Button onClick={downloadUserStories} variant="outline" size="sm">
+                    <Download className="w-4 h-4 mr-2" />
+                    Download
+                  </Button>
+                )}
               </div>
-            </div>
-            
-            {userStoryResult.status === 'completed' && userStoryResult.userStories && (
-              <Button onClick={downloadUserStories} variant="outline" size="sm">
-                <Download className="w-4 h-4 mr-2" />
-                Download
-              </Button>
-            )}
-          </div>
 
-          {userStoryResult.status === 'completed' && userStoryResult.userStories && (
-            <div className="space-y-4">
-              <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 border dark:border-gray-700">
-                <p className="text-gray-800 dark:text-gray-200 whitespace-pre-wrap leading-relaxed">
-                  {userStoryResult.userStories}
-                </p>
-              </div>
-            </div>
+              {userStoryResult.status === 'completed' && userStoryResult.userStories && (
+                <div className="space-y-4">
+                  {/* Parse and display user stories in a structured format */}
+                  {userStoryResult.userStories.split('\n').map((line, index) => {
+                    const trimmedLine = line.trim();
+                    
+                    // Skip empty lines
+                    if (!trimmedLine) return null;
+                    
+                    // Remove any markdown bold markers (**text**)
+                    const cleanedLine = trimmedLine.replace(/\*\*/g, '');
+                    
+                    // Check if line is a numbered user story (starts with number and period/parenthesis)
+                    const isUserStory = /^(\d+[\.\)]|\*|\-)\s/.test(cleanedLine);
+                    
+                    if (isUserStory) {
+                      // Extract the story number and content
+                      const storyContent = cleanedLine.replace(/^(\d+[\.\)]|\*|\-)\s/, '');
+                      
+                      // Parse "As a... I want... so that..." format
+                      const asMatch = storyContent.match(/^As a (.+?),?\s*I want (.+?),?\s*so that (.+)\.?$/i);
+                      
+                      return (
+                        <div 
+                          key={index}
+                          className="bg-white dark:bg-gray-800 rounded-lg p-5 border-l-4 border-blue-500 dark:border-blue-400 shadow-sm hover:shadow-md transition-shadow"
+                        >
+                          <div className="flex items-start gap-4">
+                            <div className="flex-shrink-0 w-8 h-8 bg-blue-100 dark:bg-blue-900 rounded-full flex items-center justify-center">
+                              <span className="text-blue-600 dark:text-blue-300 font-semibold text-sm">
+                                {cleanedLine.match(/^\d+/)?.[0] || '•'}
+                              </span>
+                            </div>
+                            <div className="flex-1 space-y-2">
+                              {asMatch ? (
+                                <>
+                                  <p className="text-gray-800 dark:text-gray-200 leading-relaxed">
+                                    <span className="font-semibold text-blue-600 dark:text-blue-400">As a {asMatch[1]}</span>
+                                    <span className="text-gray-600 dark:text-gray-400">, </span>
+                                    <span className="font-medium">I want {asMatch[2]}</span>
+                                    <span className="text-gray-600 dark:text-gray-400"> so that </span>
+                                    <span className="text-gray-700 dark:text-gray-300">{asMatch[3]}</span>
+                                  </p>
+                                </>
+                              ) : (
+                                <p className="text-gray-800 dark:text-gray-200 leading-relaxed">
+                                  {storyContent}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }
+                    
+                    // For section headers or other text (also remove asterisks)
+                    if (cleanedLine.length > 0) {
+                      return (
+                        <div key={index} className="text-gray-700 dark:text-gray-300 text-sm font-medium px-2">
+                          {cleanedLine}
+                        </div>
+                      );
+                    }
+                    
+                    return null;
+                  })}
+                </div>
+              )}
+            </>
           )}
         </Card>
       )}
