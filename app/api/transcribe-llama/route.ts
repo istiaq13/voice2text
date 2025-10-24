@@ -12,42 +12,50 @@ const LLAMA_PORT = process.env.LLAMA_PORT || '11434';
 // Function to get local IP addresses
 function getLocalIPs(): string[] {
   const interfaces = networkInterfaces();
-  const ips: string[] = ['localhost', '127.0.0.1'];
+  const ips: string[] = ['localhost', '127.0.0.1', '0.0.0.0'];
   
   for (const name of Object.keys(interfaces)) {
     const nets = interfaces[name];
     if (nets) {
       for (const net of nets) {
-        if (net.family === 'IPv4' && !net.internal) {
+        // Include both IPv4 internal and external addresses
+        if (net.family === 'IPv4') {
           ips.push(net.address);
         }
       }
     }
   }
   
-  return ips;
+  // Remove duplicates
+  return Array.from(new Set(ips));
 }
 
 // Function to check if Llama is available
 async function getLlamaUrl(): Promise<string | null> {
   const ips = getLocalIPs();
   
+  console.log('Checking Ollama on IPs:', ips);
+  
   for (const ip of ips) {
     const url = `http://${ip}:${LLAMA_PORT}`;
     try {
+      console.log(`Trying ${url}...`);
       const response = await fetch(`${url}/api/tags`, {
         method: 'GET',
-        signal: AbortSignal.timeout(2000)
+        signal: AbortSignal.timeout(3000) // Increased timeout to 3 seconds
       });
       
       if (response.ok) {
+        console.log(`✅ Found Ollama at ${url}`);
         return url;
       }
     } catch (error) {
+      console.log(`❌ Not found at ${url}`);
       continue;
     }
   }
   
+  console.log('Ollama not found on any local IP');
   return null;
 }
 

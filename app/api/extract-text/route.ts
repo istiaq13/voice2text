@@ -143,6 +143,8 @@ async function transcribeAudioVideo(buffer: Buffer, mimeType: string): Promise<s
 }
 
 export async function POST(req: NextRequest) {
+  const startTime = Date.now(); // Start timing
+  
   try {
     // Apply rate limiting for file uploads
     const rateLimitResult = await fileUploadRateLimiter(req);
@@ -232,7 +234,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const endTime = Date.now();
+    const duration = ((endTime - startTime) / 1000).toFixed(2);
+    
     console.log(`✅ Successfully extracted ${extractedText.length} characters using ${processingMethod}`);
+    console.log(`⏱️ Text extraction took ${duration} seconds`);
 
     return NextResponse.json({
       text: extractedText,

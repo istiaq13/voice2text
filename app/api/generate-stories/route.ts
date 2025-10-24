@@ -17,6 +17,8 @@ if (!apiKey) {
 const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null;
 
 export async function POST(req: NextRequest) {
+  const startTime = Date.now(); // Start timing
+  
   try {
     // Apply rate limiting
     const rateLimitResult = await apiRateLimiter(req);
@@ -46,6 +48,8 @@ export async function POST(req: NextRequest) {
 
     const { prompt } = validation.data;
 
+    console.log(' Generating user stories with Gemini AI...');
+
     // Use gemini-2.5-flash - the current free tier model available as of Oct 2025
     // This model replaced gemini-pro for free tier users
     const model = genAI.getGenerativeModel({ 
@@ -62,6 +66,12 @@ export async function POST(req: NextRequest) {
         { status: 500 }
       );
     }
+
+    const endTime = Date.now();
+    const duration = ((endTime - startTime) / 1000).toFixed(2);
+    
+    console.log(`✅ Story generation completed - Generated ${stories.length} characters`);
+    console.log(` Story generation took ${duration} seconds`);
 
     return NextResponse.json({ stories });
   } catch (error) {

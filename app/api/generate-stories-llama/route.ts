@@ -14,32 +14,37 @@ const LLAMA_PORT = process.env.LLAMA_PORT || '11434';
 // Function to get local IP addresses
 function getLocalIPs(): string[] {
   const interfaces = networkInterfaces();
-  const ips: string[] = ['localhost', '127.0.0.1'];
+  const ips: string[] = ['localhost', '127.0.0.1', '0.0.0.0'];
   
   for (const name of Object.keys(interfaces)) {
     const nets = interfaces[name];
     if (nets) {
       for (const net of nets) {
-        // Skip internal (i.e., 127.0.0.1) and non-IPv4 addresses
-        if (net.family === 'IPv4' && !net.internal) {
+        // Include both IPv4 internal and external addresses
+        if (net.family === 'IPv4') {
           ips.push(net.address);
         }
       }
     }
   }
   
-  return ips;
+  // Remove duplicates
+  return Array.from(new Set(ips));
 }
 
 // Function to check if Llama is available on any of the IPs
 async function checkLlamaAvailability(): Promise<{ available: boolean; url?: string }> {
   const ips = getLocalIPs();
   
+  console.log('Checking Ollama on IPs:', ips);
+  
   for (const ip of ips) {
+    const baseUrl = `http://${ip}:${LLAMA_PORT}`;
     try {
-      const baseUrl = `http://${ip}:${LLAMA_PORT}`;
+      console.log(`Trying ${baseUrl}...`);
+      
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 2000); // 2 second timeout per IP
+      const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout per IP
       
       const response = await fetch(`${baseUrl}/api/tags`, {
         method: 'GET',
@@ -49,14 +54,17 @@ async function checkLlamaAvailability(): Promise<{ available: boolean; url?: str
       clearTimeout(timeoutId);
       
       if (response.ok) {
+        console.log(`✅ Found Ollama at ${baseUrl}`);
         return { available: true, url: `${baseUrl}/api/generate` };
       }
     } catch (error) {
+      console.log(`❌ Not found at ${baseUrl}`);
       // Try next IP
       continue;
     }
   }
   
+  console.log('Ollama not found on any local IP');
   return { available: false };
 }
 
@@ -74,6 +82,8 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const startTime = Date.now(); // Start timing
+  
   try {
     // Apply rate limiting
     const rateLimitResult = await apiRateLimiter(req);
@@ -94,6 +104,8 @@ export async function POST(req: NextRequest) {
     }
 
     const { prompt } = validation.data;
+
+    console.log(`🦙 Generating user stories with Llama (${LLAMA_MODEL})...`);
 
     // Check if Llama is available and get the working URL
     const llamaCheck = await checkLlamaAvailability();
@@ -130,6 +142,12 @@ export async function POST(req: NextRequest) {
         { status: 500 }
       );
     }
+
+    const endTime = Date.now();
+    const duration = ((endTime - startTime) / 1000).toFixed(2);
+    
+    console.log(` Story generation completed - Generated ${stories.length} characters`);
+    console.log(` Llama story generation took ${duration} seconds`);
 
     return NextResponse.json({ stories });
   } catch (error) {
