@@ -1,7 +1,6 @@
 'use client';
 
 import * as React from 'react';
-import * as InputOTP from '@/components/ui/input-otp';
 import * as LabelPrimitive from '@radix-ui/react-label';
 import * as RadioGroupPrimitive from '@radix-ui/react-radio-group';
 import * as SelectPrimitive from '@radix-ui/react-select';

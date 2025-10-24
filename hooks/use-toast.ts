@@ -3,7 +3,12 @@
 // Inspired by react-hot-toast library
 import * as React from 'react';
 
-import type { ToastActionElement, ToastProps } from '@/components/ui/toast';
+// Define the types locally since they're not exported from the feedback component
+type ToastActionElement = React.ReactElement;
+type ToastProps = {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+};
 
 const TOAST_LIMIT = 1;
 const TOAST_REMOVE_DELAY = 1000000;
