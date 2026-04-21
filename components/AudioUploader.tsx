@@ -12,7 +12,7 @@ import { FileUploadSkeleton, UserStoryLoadingSkeleton } from '@/components/ui/sk
 import { transcribeAudio } from '@/lib/gemini';
 import { useTheme } from '@/contexts/ThemeContext';
 import { safeValidateRequirements } from '@/lib/validators';
-import type { UserStoryResult, AIModel } from '@/types';
+import type { UserStoryResult, AIModel, OutputFormat } from '@/types';
 
 // Enhanced keyword configuration with categories
 const KEYWORD_CATEGORIES = {
@@ -49,6 +49,11 @@ export default function AudioUploader() {
   const [isLlamaAvailable, setIsLlamaAvailable] = useState(false);
   const [isCheckingLlama, setIsCheckingLlama] = useState(true);
   const [llamaModel, setLlamaModel] = useState<string>('');
+  const [outputFormat, setOutputFormat] = useState<OutputFormat>('standard');
+  const [detectedDomain, setDetectedDomain] = useState<string | null>(null);
+  const [isDetectingDomain, setIsDetectingDomain] = useState(false);
+  const [isExportingJira, setIsExportingJira] = useState(false);
+  const [jiraResults, setJiraResults] = useState<{ results: { key: string; url: string; summary: string }[]; errors: { summary: string; error: string }[] } | null>(null);
 
   // Maximum keywords limit
   const MAX_KEYWORDS = 10;
@@ -146,6 +151,108 @@ export default function AudioUploader() {
   // Clear all keywords
   function clearAllKeywords() {
     setSelectedKeywords([]);
+  }
+
+  // Auto-detect domain from requirements using Gemini
+  async function detectDomain() {
+    if (!requirements.trim() || requirements.length < 50) return;
+    setIsDetectingDomain(true);
+    try {
+      const response = await fetch('/api/detect-domain', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requirements }),
+      });
+      const data = await response.json();
+      if (data.domain) {
+        setDetectedDomain(data.domain);
+        setSelectedCategory(data.domain);
+        const categoryKeywords = KEYWORD_CATEGORIES[data.domain as keyof typeof KEYWORD_CATEGORIES] || [];
+        const slots = MAX_KEYWORDS - selectedKeywords.length;
+        const newKeywords = categoryKeywords
+          .filter((k) => !selectedKeywords.includes(k))
+          .slice(0, Math.max(0, slots));
+        if (newKeywords.length > 0) {
+          setSelectedKeywords((prev) => [...prev, ...newKeywords]);
+        }
+      }
+    } catch (e) {
+      console.error('Domain detection failed:', e);
+    } finally {
+      setIsDetectingDomain(false);
+    }
+  }
+
+  // Build prompt based on selected output format
+  function buildPrompt(): string {
+    const keywordsText =
+      selectedKeywords.length > 0
+        ? `Focus on these keywords: ${selectedKeywords.join(', ')}.`
+        : '';
+
+    switch (outputFormat) {
+      case 'gherkin':
+        return `Generate exactly ${numStories} user stories in Gherkin BDD format based on these requirements:
+
+${requirements}
+
+${keywordsText}
+
+For each story use this format:
+N. Feature: [feature name]
+   As a [user type], I want [goal] so that [benefit].
+
+   Scenario: [scenario name]
+     Given [initial state]
+     When [action is taken]
+     Then [expected result]`;
+
+      case 'invest':
+        return `Generate exactly ${numStories} user stories following INVEST criteria based on these requirements:
+
+${requirements}
+
+${keywordsText}
+
+For each story use this format:
+N. Story: As a [user type], I want [goal] so that [benefit].
+   Independent: [how this story is self-contained]
+   Valuable: [business value delivered]
+   Estimable: [XS / S / M / L / XL]
+   Small: [fits in one sprint: Yes / No]
+   Testable: [how to verify completion]`;
+
+      case 'jira':
+        return `Generate exactly ${numStories} user stories in Jira-ready format based on these requirements:
+
+${requirements}
+
+${keywordsText}
+
+For each story use this format:
+N. Summary: [brief title under 100 characters]
+   Description: As a [user type], I want [goal] so that [benefit].
+   Acceptance Criteria:
+   - [criterion 1]
+   - [criterion 2]
+   Story Points: [1 / 2 / 3 / 5 / 8]
+   Labels: [comma-separated labels]`;
+
+      default: // standard
+        return `Generate exactly ${numStories} user stories based on these software requirements:
+
+${requirements}
+
+${keywordsText}
+
+For each user story use this exact format:
+N. As a [user type], I want [goal] so that [benefit].
+   Acceptance Criteria:
+   - Given [context], When [action], Then [expected outcome]
+   - [add more criteria as needed]
+
+Make each story clear, concise, and testable.`;
+    }
   }
 
   // Get filtered keywords based on search and category
@@ -280,21 +387,7 @@ export default function AudioUploader() {
     });
 
     try {
-      // Call appropriate API based on selected model
-      const keywordsText = selectedKeywords.length > 0 ? ` Focus on these keywords: ${selectedKeywords.join(', ')}.` : '';
-      const prompt = `Generate exactly ${numStories} user stories based on these software requirements: 
-
-${requirements}
-
-${keywordsText}
-
-Please format the user stories as:
-1. As a [user type], I want [goal] so that [benefit].
-2. As a [user type], I want [goal] so that [benefit].
-...and so on.
-
-Make sure each user story follows the standard format and is relevant to the requirements provided.`;
-      
+      const prompt = buildPrompt();
       const apiEndpoint = model === 'llama' ? '/api/generate-stories-llama' : '/api/generate-stories';
       
       const response = await fetch(apiEndpoint, {
@@ -324,6 +417,7 @@ Make sure each user story follows the standard format and is relevant to the req
         timestamp: new Date(),
         status: 'completed',
         model,
+        outputFormat,
       };
 
       setUserStoryResult(result);
@@ -340,7 +434,7 @@ Make sure each user story follows the standard format and is relevant to the req
 
   const downloadUserStories = () => {
     if (!userStoryResult?.userStories) return;
-    
+
     const content = `Software Requirements:\n${userStoryResult.requirements}\n\nKeywords: ${userStoryResult.keywords.join(', ')}\n\nGenerated User Stories:\n${userStoryResult.userStories}`;
     const blob = new Blob([content], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
@@ -349,6 +443,29 @@ Make sure each user story follows the standard format and is relevant to the req
     a.download = 'user_stories.txt';
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const exportToJira = async () => {
+    if (!userStoryResult?.userStories) return;
+    setIsExportingJira(true);
+    setJiraResults(null);
+    try {
+      const response = await fetch('/api/export-jira', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stories: userStoryResult.userStories }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        setError(data.error || 'Failed to export to Jira');
+        return;
+      }
+      setJiraResults(data);
+    } catch (e) {
+      setError('Failed to connect to Jira export endpoint');
+    } finally {
+      setIsExportingJira(false);
+    }
   };
 
   return (
@@ -486,7 +603,7 @@ Make sure each user story follows the standard format and is relevant to the req
         <div className="grid md:grid-cols-4 gap-6">
           {/* Number of Stories - Takes 1 column */}
           <div className="space-y-2">
-            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Number of User Stories</label>
+            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Number of Stories</label>
             <Select value={numStories.toString()} onValueChange={(value: string) => setNumStories(parseInt(value))}>
               <SelectTrigger>
                 <SelectValue />
@@ -501,8 +618,24 @@ Make sure each user story follows the standard format and is relevant to the req
             </Select>
           </div>
 
-          {/* Enhanced Keywords Section - Takes 3 columns */}
-          <div className="md:col-span-3 space-y-4">
+          {/* Output Format - Takes 1 column */}
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Output Format</label>
+            <Select value={outputFormat} onValueChange={(value: string) => setOutputFormat(value as OutputFormat)}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="standard">Standard + AC</SelectItem>
+                <SelectItem value="gherkin">Gherkin BDD</SelectItem>
+                <SelectItem value="invest">INVEST</SelectItem>
+                <SelectItem value="jira">Jira-ready</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Enhanced Keywords Section - Takes 2 columns */}
+          <div className="md:col-span-2 space-y-4">
             <div className="flex items-center justify-between">
               <label className="text-sm font-medium flex items-center gap-2">
                 <Tag className="w-4 h-4" />
@@ -563,7 +696,28 @@ Make sure each user story follows the standard format and is relevant to the req
 
             {/* Category Filter */}
             <div className="space-y-2">
-              <label className="text-xs font-medium">Browse by Category:</label>
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-medium">Browse by Category:</label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={detectDomain}
+                  disabled={isDetectingDomain || requirements.length < 50}
+                  className="text-xs h-6 px-2 border-purple-300 dark:border-purple-700 text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950"
+                >
+                  {isDetectingDomain ? (
+                    <><Loader2 className="w-3 h-3 mr-1 animate-spin" />Detecting...</>
+                  ) : (
+                    <><Sparkles className="w-3 h-3 mr-1" />Auto-detect Domain</>
+                  )}
+                </Button>
+              </div>
+              {detectedDomain && (
+                <p className="text-xs text-purple-600 dark:text-purple-400">
+                  Detected: <span className="font-semibold">{detectedDomain}</span> — keywords auto-applied
+                </p>
+              )}
               <div className="flex flex-wrap gap-2">
                 <Badge
                   variant={selectedCategory === 'All' ? 'default' : 'outline'}
@@ -763,82 +917,152 @@ Make sure each user story follows the standard format and is relevant to the req
                 </div>
                 
                 {userStoryResult.status === 'completed' && userStoryResult.userStories && (
-                  <Button onClick={downloadUserStories} variant="outline" size="sm">
-                    <Download className="w-4 h-4 mr-2" />
-                    Download
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button onClick={downloadUserStories} variant="outline" size="sm">
+                      <Download className="w-4 h-4 mr-2" />
+                      Download
+                    </Button>
+                    <Button
+                      onClick={exportToJira}
+                      disabled={isExportingJira}
+                      size="sm"
+                      className="bg-blue-600 hover:bg-blue-700 text-white"
+                    >
+                      {isExportingJira ? (
+                        <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Exporting...</>
+                      ) : (
+                        <>
+                          <svg className="w-4 h-4 mr-2" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M11.571 11.513H0a5.218 5.218 0 0 0 5.232 5.215h2.13v2.057A5.215 5.215 0 0 0 12.575 24V12.518a1.005 1.005 0 0 0-1.004-1.005zm5.723-5.756H5.736a5.215 5.215 0 0 0 5.215 5.214h2.129v2.058a5.218 5.218 0 0 0 5.215 5.214V6.762a1.005 1.005 0 0 0-1.001-1.005zM23.013 0H11.459a5.215 5.215 0 0 0 5.214 5.215h2.129v2.057A5.215 5.215 0 0 0 24.017 12.49V1.005A1.005 1.005 0 0 0 23.013 0z"/>
+                          </svg>
+                          Export to Jira
+                        </>
+                      )}
+                    </Button>
+                  </div>
                 )}
               </div>
 
               {userStoryResult.status === 'completed' && userStoryResult.userStories && (
                 <div className="space-y-4">
-                  {/* Parse and display user stories in a structured format */}
-                  {userStoryResult.userStories.split('\n').map((line, index) => {
-                    const trimmedLine = line.trim();
-                    
-                    // Skip empty lines
-                    if (!trimmedLine) return null;
-                    
-                    // Remove any markdown bold markers (**text**)
-                    const cleanedLine = trimmedLine.replace(/\*\*/g, '');
-                    
-                    // Check if line is a numbered user story (starts with number and period/parenthesis)
-                    const isUserStory = /^(\d+[\.\)]|\*|\-)\s/.test(cleanedLine);
-                    
-                    if (isUserStory) {
-                      // Extract the story number and content
-                      const storyContent = cleanedLine.replace(/^(\d+[\.\)]|\*|\-)\s/, '');
-                      
-                      // Parse "As a... I want... so that..." format
-                      const asMatch = storyContent.match(/^As a (.+?),?\s*I want (.+?),?\s*so that (.+)\.?$/i);
-                      
+                  {(() => {
+                    // Group lines into story blocks: each numbered line starts a block,
+                    // subsequent non-numbered lines (AC, scenarios, etc.) are details.
+                    const lines = userStoryResult.userStories.split('\n');
+                    const blocks: Array<{ storyLine: string; details: string[] }> = [];
+                    let current: { storyLine: string; details: string[] } | null = null;
+
+                    for (const line of lines) {
+                      const trimmed = line.trim();
+                      if (!trimmed) continue;
+                      const clean = trimmed.replace(/\*\*/g, '');
+                      const isStory = /^(\d+[\.\)])\s/.test(clean);
+                      if (isStory) {
+                        if (current) blocks.push(current);
+                        current = { storyLine: clean, details: [] };
+                      } else if (current) {
+                        current.details.push(clean);
+                      }
+                    }
+                    if (current) blocks.push(current);
+
+                    return blocks.map((block, idx) => {
+                      const storyContent = block.storyLine.replace(/^(\d+[\.\)])\s/, '');
+                      const storyNum = block.storyLine.match(/^\d+/)?.[0] || String(idx + 1);
+                      const asMatch = storyContent.match(/^As a (.+?),?\s*I want (.+?),?\s*so that (.+?)\.?$/i);
+
                       return (
-                        <div 
-                          key={index}
+                        <div
+                          key={idx}
                           className="bg-white dark:bg-gray-800 rounded-lg p-5 border-l-4 border-blue-500 dark:border-blue-400 shadow-sm hover:shadow-md transition-shadow"
                         >
                           <div className="flex items-start gap-4">
                             <div className="flex-shrink-0 w-8 h-8 bg-blue-100 dark:bg-blue-900 rounded-full flex items-center justify-center">
-                              <span className="text-blue-600 dark:text-blue-300 font-semibold text-sm">
-                                {cleanedLine.match(/^\d+/)?.[0] || '•'}
-                              </span>
+                              <span className="text-blue-600 dark:text-blue-300 font-semibold text-sm">{storyNum}</span>
                             </div>
                             <div className="flex-1 space-y-2">
                               {asMatch ? (
-                                <>
-                                  <p className="text-gray-800 dark:text-gray-200 leading-relaxed">
-                                    <span className="font-semibold text-blue-600 dark:text-blue-400">As a {asMatch[1]}</span>
-                                    <span className="text-gray-600 dark:text-gray-400">, </span>
-                                    <span className="font-medium">I want {asMatch[2]}</span>
-                                    <span className="text-gray-600 dark:text-gray-400"> so that </span>
-                                    <span className="text-gray-700 dark:text-gray-300">{asMatch[3]}</span>
-                                  </p>
-                                </>
-                              ) : (
                                 <p className="text-gray-800 dark:text-gray-200 leading-relaxed">
-                                  {storyContent}
+                                  <span className="font-semibold text-blue-600 dark:text-blue-400">As a {asMatch[1]}</span>
+                                  <span className="text-gray-600 dark:text-gray-400">, </span>
+                                  <span className="font-medium">I want {asMatch[2]}</span>
+                                  <span className="text-gray-600 dark:text-gray-400"> so that </span>
+                                  <span className="text-gray-700 dark:text-gray-300">{asMatch[3]}</span>
                                 </p>
+                              ) : (
+                                <p className="text-gray-800 dark:text-gray-200 leading-relaxed">{storyContent}</p>
+                              )}
+                              {block.details.length > 0 && (
+                                <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700 space-y-1">
+                                  {block.details.map((detail, di) => {
+                                    const isHeader = !detail.startsWith('-') && !detail.startsWith('Given') && !detail.startsWith('When') && !detail.startsWith('Then') && detail.endsWith(':');
+                                    return (
+                                      <p
+                                        key={di}
+                                        className={`text-sm ${isHeader ? 'font-semibold text-gray-700 dark:text-gray-300 mt-2' : 'text-gray-500 dark:text-gray-400 pl-2'}`}
+                                      >
+                                        {detail}
+                                      </p>
+                                    );
+                                  })}
+                                </div>
                               )}
                             </div>
                           </div>
                         </div>
                       );
-                    }
-                    
-                    // For section headers or other text (also remove asterisks)
-                    if (cleanedLine.length > 0) {
-                      return (
-                        <div key={index} className="text-gray-700 dark:text-gray-300 text-sm font-medium px-2">
-                          {cleanedLine}
-                        </div>
-                      );
-                    }
-                    
-                    return null;
-                  })}
+                    });
+                  })()}
                 </div>
               )}
             </>
+          )}
+        </Card>
+      )}
+
+      {/* Jira Export Results */}
+      {jiraResults && (
+        <Card className="p-6 space-y-4">
+          <div className="flex items-center gap-2">
+            <svg className="w-5 h-5 text-blue-600" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M11.571 11.513H0a5.218 5.218 0 0 0 5.232 5.215h2.13v2.057A5.215 5.215 0 0 0 12.575 24V12.518a1.005 1.005 0 0 0-1.004-1.005zm5.723-5.756H5.736a5.215 5.215 0 0 0 5.215 5.214h2.129v2.058a5.218 5.218 0 0 0 5.215 5.214V6.762a1.005 1.005 0 0 0-1.001-1.005zM23.013 0H11.459a5.215 5.215 0 0 0 5.214 5.215h2.129v2.057A5.215 5.215 0 0 0 24.017 12.49V1.005A1.005 1.005 0 0 0 23.013 0z"/>
+            </svg>
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+              Jira Export — {jiraResults.results.length} of {jiraResults.results.length + jiraResults.errors.length} stories created
+            </h3>
+          </div>
+
+          {jiraResults.results.length > 0 && (
+            <div className="space-y-2">
+              {jiraResults.results.map((issue) => (
+                <div key={issue.key} className="flex items-center gap-3 p-3 bg-green-50 dark:bg-green-950 rounded-lg border border-green-200 dark:border-green-800">
+                  <CheckCircle className="w-4 h-4 text-green-600 dark:text-green-400 flex-shrink-0" />
+                  <a
+                    href={issue.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:underline flex-shrink-0"
+                  >
+                    {issue.key}
+                  </a>
+                  <span className="text-sm text-gray-600 dark:text-gray-400 truncate">{issue.summary}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {jiraResults.errors.length > 0 && (
+            <div className="space-y-2">
+              {jiraResults.errors.map((err, i) => (
+                <div key={i} className="flex items-start gap-3 p-3 bg-red-50 dark:bg-red-950 rounded-lg border border-red-200 dark:border-red-800">
+                  <AlertCircle className="w-4 h-4 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm text-gray-700 dark:text-gray-300 truncate">{err.summary}</p>
+                    <p className="text-xs text-red-600 dark:text-red-400">{err.error}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
         </Card>
       )}

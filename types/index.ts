@@ -7,6 +7,7 @@ export interface UserStoryResult {
   timestamp: Date;
   status: 'processing' | 'completed' | 'error';
   model?: 'gemini' | 'llama';
+  outputFormat?: OutputFormat;
 }
 
 // API Response types
@@ -30,6 +31,9 @@ export interface ModelAvailability {
 
 // AI Model types
 export type AIModel = 'gemini' | 'llama';
+
+// Output format types
+export type OutputFormat = 'standard' | 'gherkin' | 'invest' | 'jira';
 
 // File upload types
 export interface FileUploadState {
