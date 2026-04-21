@@ -3,9 +3,9 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { safeValidateStoryGenerationRequest } from '@/lib/validators';
 import { apiRateLimiter } from '@/lib/rate-limit';
 
-// Mark this route as dynamic
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+export const maxDuration = 60;
 
 // Initialize Gemini AI with API key from environment variables
 const apiKey = process.env.GOOGLE_API_KEY;
@@ -50,15 +50,20 @@ export async function POST(req: NextRequest) {
 
     console.log(' Generating user stories with Gemini AI...');
 
-    // Use gemini-2.5-flash - the current free tier model available as of Oct 2025
-    // This model replaced gemini-pro for free tier users
-    const model = genAI.getGenerativeModel({ 
-      model: 'gemini-2.5-flash',
+    const geminiModel = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+    const model = genAI.getGenerativeModel({
+      model: geminiModel,
+      generationConfig: { temperature: 0.4 },
     });
 
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const stories = response.text();
+    const timeoutMs = 55000;
+    const result = await Promise.race([
+      model.generateContent(prompt),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Gemini request timed out after 55s')), timeoutMs)
+      ),
+    ]);
+    const stories = result.response.text();
 
     if (!stories || stories.trim().length === 0) {
       return NextResponse.json(

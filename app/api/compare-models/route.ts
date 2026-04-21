@@ -4,6 +4,7 @@ import { strictRateLimiter } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+export const maxDuration = 120;
 
 const geminiClient = process.env.GOOGLE_API_KEY
   ? new GoogleGenerativeAI(process.env.GOOGLE_API_KEY)
@@ -17,12 +18,16 @@ const LLAMA_SYSTEM =
 
 async function runGemini(prompt: string): Promise<string> {
   if (!geminiClient) throw new Error('Gemini API key not configured');
-  // Lower temperature → more deterministic format compliance
   const model = geminiClient.getGenerativeModel({
-    model: 'gemini-2.5-flash',
+    model: process.env.GEMINI_MODEL || 'gemini-2.0-flash',
     generationConfig: { temperature: 0.4 },
   });
-  const result = await model.generateContent(prompt);
+  const result = await Promise.race([
+    model.generateContent(prompt),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Gemini timed out after 55s')), 55000)
+    ),
+  ]);
   return result.response.text();
 }
 

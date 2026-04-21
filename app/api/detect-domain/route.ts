@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Requirements too short' }, { status: 400 });
     }
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    const model = genAI.getGenerativeModel({ model: process.env.GEMINI_MODEL || 'gemini-2.0-flash' });
 
     const prompt = `Analyze these software requirements and identify which ONE domain category best matches from this list: ${DOMAIN_CATEGORIES.join(', ')}.
 

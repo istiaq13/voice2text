@@ -17,10 +17,11 @@ interface ModelStatus {
 }
 
 function checkGemini(): ModelStatus {
-  const key = process.env.GOOGLE_API_KEY;
-  if (!key) return { name: 'Gemini 2.5 Flash', status: 'missing_key', detail: 'GOOGLE_API_KEY not set' };
-  if (!key.startsWith('AIza')) return { name: 'Gemini 2.5 Flash', status: 'missing_key', detail: 'GOOGLE_API_KEY looks invalid' };
-  return { name: 'Gemini 2.5 Flash', status: 'ok', detail: 'gemini-2.5-flash · key configured' };
+  const key   = process.env.GOOGLE_API_KEY;
+  const model = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+  if (!key) return { name: `Gemini (${model})`, status: 'missing_key', detail: 'GOOGLE_API_KEY not set' };
+  if (!key.startsWith('AIza')) return { name: `Gemini (${model})`, status: 'missing_key', detail: 'GOOGLE_API_KEY looks invalid' };
+  return { name: `Gemini (${model})`, status: 'ok', detail: `${model} · key configured` };
 }
 
 function checkGroq(): ModelStatus {

@@ -51,7 +51,7 @@ async function extractFromPDF(buffer: Buffer): Promise<string> {
     }
 
     // Use Gemini AI to extract text from PDF (supports multimodal input)
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    const model = genAI.getGenerativeModel({ model: process.env.GEMINI_MODEL || 'gemini-2.0-flash' });
     const base64 = buffer.toString('base64');
 
     const result = await model.generateContent([
@@ -122,7 +122,7 @@ async function extractFromText(buffer: Buffer): Promise<string> {
 // Transcribe audio/video using Gemini
 async function transcribeAudioVideo(buffer: Buffer, mimeType: string): Promise<string> {
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    const model = genAI.getGenerativeModel({ model: process.env.GEMINI_MODEL || 'gemini-2.0-flash' });
     const base64 = buffer.toString('base64');
 
     const result = await model.generateContent([
