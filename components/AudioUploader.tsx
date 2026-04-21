@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback, useEffect } from 'react';
 import { useDropzone, FileRejection } from 'react-dropzone';
-import { Upload, FileText, FileAudio, Loader2, CheckCircle, AlertCircle, Download, X, Plus, Sparkles, Cpu, Tag, Mic, Moon, Sun } from 'lucide-react';
+import { Upload, FileText, FileAudio, Loader2, CheckCircle, AlertCircle, Download, X, Plus, Sparkles, Cpu, Tag, Mic, Moon, Sun, BarChart2 } from 'lucide-react';
 import { Button } from '@/components/core/button';
 import { Card } from '@/components/core/layout';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Input, Textarea } from '@/components/core/form';
@@ -13,6 +13,7 @@ import { transcribeAudio } from '@/lib/gemini';
 import { useTheme } from '@/contexts/ThemeContext';
 import { safeValidateRequirements } from '@/lib/validators';
 import type { UserStoryResult, AIModel, OutputFormat } from '@/types';
+import ModelComparison from '@/components/ModelComparison';
 
 // Enhanced keyword configuration with categories
 const KEYWORD_CATEGORIES = {
@@ -49,11 +50,17 @@ export default function AudioUploader() {
   const [isLlamaAvailable, setIsLlamaAvailable] = useState(false);
   const [isCheckingLlama, setIsCheckingLlama] = useState(true);
   const [llamaModel, setLlamaModel] = useState<string>('');
+  const [isGroqAvailable, setIsGroqAvailable] = useState(false);
+  const [groqModel, setGroqModel] = useState<string>('');
+  const [isQwenAvailable, setIsQwenAvailable] = useState(false);
+  const [qwenModel, setQwenModel] = useState<string>('');
+  const [selectedModel, setSelectedModel] = useState<AIModel>('gemini');
   const [outputFormat, setOutputFormat] = useState<OutputFormat>('standard');
   const [detectedDomain, setDetectedDomain] = useState<string | null>(null);
   const [isDetectingDomain, setIsDetectingDomain] = useState(false);
   const [isExportingJira, setIsExportingJira] = useState(false);
   const [jiraResults, setJiraResults] = useState<{ results: { key: string; url: string; summary: string }[]; errors: { summary: string; error: string }[] } | null>(null);
+  const [comparisonPrompt, setComparisonPrompt] = useState<string | null>(null);
 
   // Maximum keywords limit
   const MAX_KEYWORDS = 10;
@@ -68,25 +75,32 @@ export default function AudioUploader() {
     }
   }, [requirements]);
 
-  // Check Llama availability on component mount
+  // Check model availability on component mount
   useEffect(() => {
-    const checkLlamaAvailability = async () => {
-      try {
-        const response = await fetch('/api/generate-stories-llama');
-        const data = await response.json();
-        setIsLlamaAvailable(data.available || false);
-        if (data.model) {
-          setLlamaModel(data.model);
-        }
-      } catch (error) {
-        console.error('Failed to check Llama availability:', error);
-        setIsLlamaAvailable(false);
-      } finally {
-        setIsCheckingLlama(false);
+    const checkAvailability = async () => {
+      const [llamaRes, groqRes, qwenRes] = await Promise.allSettled([
+        fetch('/api/generate-stories-llama').then(r => r.json()),
+        fetch('/api/generate-stories-groq').then(r => r.json()),
+        fetch('/api/generate-stories-qwen').then(r => r.json()),
+      ]);
+
+      if (llamaRes.status === 'fulfilled') {
+        setIsLlamaAvailable(llamaRes.value.available || false);
+        if (llamaRes.value.model) setLlamaModel(llamaRes.value.model);
       }
+      if (groqRes.status === 'fulfilled') {
+        setIsGroqAvailable(groqRes.value.available || false);
+        if (groqRes.value.model) setGroqModel(groqRes.value.model);
+      }
+      if (qwenRes.status === 'fulfilled') {
+        setIsQwenAvailable(qwenRes.value.available || false);
+        if (qwenRes.value.model) setQwenModel(qwenRes.value.model);
+      }
+
+      setIsCheckingLlama(false);
     };
 
-    checkLlamaAvailability();
+    checkAvailability();
   }, []);
 
   // Auto-suggest keywords based on text analysis
@@ -163,6 +177,7 @@ export default function AudioUploader() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ requirements }),
       });
+      if (!response.ok) throw new Error(`Domain detection failed: ${response.status}`);
       const data = await response.json();
       if (data.domain) {
         setDetectedDomain(data.domain);
@@ -175,9 +190,14 @@ export default function AudioUploader() {
         if (newKeywords.length > 0) {
           setSelectedKeywords((prev) => [...prev, ...newKeywords]);
         }
+      } else {
+        setError('Could not detect domain — try selecting keywords manually.');
+        setTimeout(() => setError(''), 3000);
       }
     } catch (e) {
       console.error('Domain detection failed:', e);
+      setError('Domain detection failed. Please select keywords manually.');
+      setTimeout(() => setError(''), 3000);
     } finally {
       setIsDetectingDomain(false);
     }
@@ -185,73 +205,100 @@ export default function AudioUploader() {
 
   // Build prompt based on selected output format
   function buildPrompt(): string {
+    const domainContext = detectedDomain
+      ? `This is a ${detectedDomain} domain system.`
+      : '';
+
     const keywordsText =
       selectedKeywords.length > 0
-        ? `Focus on these keywords: ${selectedKeywords.join(', ')}.`
+        ? `Prioritise these functional areas: ${selectedKeywords.join(', ')}.`
         : '';
+
+    const sharedRules = `
+RULES — follow all of these strictly:
+1. Extract the specific user roles from the requirements (e.g. "student", "librarian", "admin"). Never use the generic word "user" — always use a specific role.
+2. Each story must cover a completely distinct feature. No two stories may overlap or duplicate each other.
+3. The "so that" clause must state a real business outcome or user benefit — not just restate the action (e.g. "so that I can track overdue fines across departments" not "so that I can manage fines").
+4. Every acceptance criterion must be specific: include real data values, error states, or edge cases (e.g. "Given the student has 3 overdue books" not "Given the user is logged in").
+5. Each story must be small enough to complete in one sprint. If a feature is too large, split it.`;
 
     switch (outputFormat) {
       case 'gherkin':
-        return `Generate exactly ${numStories} user stories in Gherkin BDD format based on these requirements:
+        return `You are an expert agile business analyst. Generate exactly ${numStories} user stories in Gherkin BDD format.
+${domainContext}
 
+Requirements:
 ${requirements}
 
 ${keywordsText}
+${sharedRules}
 
-For each story use this format:
-N. Feature: [feature name]
-   As a [user type], I want [goal] so that [benefit].
+Format each story exactly as:
+N. Feature: [specific feature name]
+   As a [specific role], I want [specific goal] so that [real business outcome].
 
-   Scenario: [scenario name]
-     Given [initial state]
-     When [action is taken]
-     Then [expected result]`;
+   Scenario: [descriptive scenario name]
+     Given [specific initial state with real data]
+     When [specific action taken]
+     Then [specific measurable result]
+
+   Scenario: [edge case or error scenario]
+     Given [specific condition]
+     When [action]
+     Then [expected system response]`;
 
       case 'invest':
-        return `Generate exactly ${numStories} user stories following INVEST criteria based on these requirements:
+        return `You are an expert agile business analyst. Generate exactly ${numStories} user stories that fully satisfy the INVEST criteria.
+${domainContext}
 
+Requirements:
 ${requirements}
 
 ${keywordsText}
+${sharedRules}
 
-For each story use this format:
-N. Story: As a [user type], I want [goal] so that [benefit].
-   Independent: [how this story is self-contained]
-   Valuable: [business value delivered]
-   Estimable: [XS / S / M / L / XL]
-   Small: [fits in one sprint: Yes / No]
-   Testable: [how to verify completion]`;
+Format each story exactly as:
+N. Story: As a [specific role], I want [specific goal] so that [real business outcome].
+   Independent: [explain how this story can be built and deployed without depending on other stories]
+   Valuable: [explain the measurable business or user value delivered]
+   Estimable: [XS / S / M / L / XL — justify the size in one sentence]
+   Small: [Yes / No — if No, suggest how to split it]
+   Testable: [describe exactly how QA would verify this story is complete]`;
 
       case 'jira':
-        return `Generate exactly ${numStories} user stories in Jira-ready format based on these requirements:
+        return `You are an expert agile business analyst. Generate exactly ${numStories} user stories in Jira-ready format.
+${domainContext}
 
+Requirements:
 ${requirements}
 
 ${keywordsText}
+${sharedRules}
 
-For each story use this format:
-N. Summary: [brief title under 100 characters]
-   Description: As a [user type], I want [goal] so that [benefit].
+Format each story exactly as:
+N. Summary: [action-oriented title under 80 characters, e.g. "Book search by ISBN with real-time availability"]
+   Description: As a [specific role], I want [specific goal] so that [real business outcome].
    Acceptance Criteria:
-   - [criterion 1]
-   - [criterion 2]
+   - Given [specific state], When [specific action], Then [specific measurable result]
+   - Given [error/edge case], When [action], Then [expected system behaviour]
    Story Points: [1 / 2 / 3 / 5 / 8]
-   Labels: [comma-separated labels]`;
+   Labels: [2–4 relevant labels from the requirements, comma-separated]`;
 
       default: // standard
-        return `Generate exactly ${numStories} user stories based on these software requirements:
+        return `You are an expert agile business analyst. Generate exactly ${numStories} user stories.
+${domainContext}
 
+Requirements:
 ${requirements}
 
 ${keywordsText}
+${sharedRules}
 
-For each user story use this exact format:
-N. As a [user type], I want [goal] so that [benefit].
+Format each story exactly as:
+N. As a [specific role], I want [specific goal] so that [real business outcome].
    Acceptance Criteria:
-   - Given [context], When [action], Then [expected outcome]
-   - [add more criteria as needed]
-
-Make each story clear, concise, and testable.`;
+   - Given [specific state with real data], When [specific action], Then [specific measurable result]
+   - Given [error or edge case], When [action], Then [expected system behaviour]`;
     }
   }
 
@@ -313,7 +360,7 @@ Make each story clear, concise, and testable.`;
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
+        const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.error || 'Failed to extract text from file');
       }
 
@@ -388,7 +435,11 @@ Make each story clear, concise, and testable.`;
 
     try {
       const prompt = buildPrompt();
-      const apiEndpoint = model === 'llama' ? '/api/generate-stories-llama' : '/api/generate-stories';
+      const apiEndpoint =
+        model === 'llama' ? '/api/generate-stories-llama' :
+        model === 'groq'  ? '/api/generate-stories-groq' :
+        model === 'qwen'  ? '/api/generate-stories-qwen' :
+        '/api/generate-stories';
       
       const response = await fetch(apiEndpoint, {
         method: 'POST',
@@ -455,7 +506,7 @@ Make each story clear, concise, and testable.`;
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ stories: userStoryResult.userStories }),
       });
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
       if (!response.ok) {
         setError(data.error || 'Failed to export to Jira');
         return;
@@ -469,7 +520,7 @@ Make each story clear, concise, and testable.`;
   };
 
   return (
-    <div className="max-w-4xl mx-auto p-6 space-y-8">
+    <div className="max-w-6xl mx-auto p-6 space-y-8">
       {/* Header */}
       <div className="text-center space-y-4 relative">
         {/* Theme Toggle Button - Absolute positioned in top-right */}
@@ -489,7 +540,7 @@ Make each story clear, concise, and testable.`;
           <FileText className="w-8 h-8 text-blue-600 dark:text-blue-400" />
         </div>
         <h1 className="text-4xl font-bold text-gray-900 dark:text-white">User Story Generator</h1>
-        <p className="text-lg text-gray-600 dark:text-gray-300 max-w-2xl mx-auto">
+        <p className="text-lg text-gray-600 dark:text-gray-300 max-w-3xl mx-auto">
           Generate user stories from your software requirements using AI-powered analysis
         </p>
       </div>
@@ -803,76 +854,103 @@ Make each story clear, concise, and testable.`;
           </div>
         </div>
 
-        {/* Generate Buttons */}
+        {/* Model Selection + Generate */}
         <div className="space-y-3">
-          <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-            Choose AI Model:
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            {/* Gemini Button */}
-            <Button 
-              onClick={() => generateUserStories('gemini')} 
-              className="w-full bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 dark:from-blue-400 dark:to-purple-500 dark:hover:from-blue-500 dark:hover:to-purple-600 text-white font-medium"
-              disabled={isProcessing || !requirements.trim() || isExtracting}
+          <label className="text-sm font-medium text-gray-700 dark:text-gray-300">AI Model</label>
+          <div className="flex gap-3">
+            <Select
+              value={selectedModel}
+              onValueChange={(value: string) => setSelectedModel(value as AIModel)}
             >
-              {isProcessing && userStoryResult?.model === 'gemini' ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Generating...
-                </>
+              <SelectTrigger className="w-64">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="gemini">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-blue-500" />
+                    <span>Gemini 2.5 Flash</span>
+                    <span className="text-xs text-gray-400 ml-1">Google</span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="groq" disabled={!isGroqAvailable}>
+                  <div className="flex items-center gap-2">
+                    <Cpu className="w-4 h-4 text-orange-500" />
+                    <span>Llama 3.3 70B</span>
+                    <span className="text-xs text-gray-400 ml-1">Groq {!isGroqAvailable && '· not configured'}</span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="llama" disabled={!isLlamaAvailable}>
+                  <div className="flex items-center gap-2">
+                    <Cpu className="w-4 h-4 text-green-500" />
+                    <span>Llama 3.1 8B</span>
+                    <span className="text-xs text-gray-400 ml-1">{isLlamaAvailable ? llamaModel : 'Ollama offline'}</span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="qwen" disabled={!isQwenAvailable}>
+                  <div className="flex items-center gap-2">
+                    <Cpu className="w-4 h-4 text-purple-500" />
+                    <span>Qwen 2.5 7B</span>
+                    <span className="text-xs text-gray-400 ml-1">{isQwenAvailable ? qwenModel : 'not pulled'}</span>
+                  </div>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Button
+              onClick={() => generateUserStories(selectedModel)}
+              disabled={isProcessing || !requirements.trim() || isExtracting || isCheckingLlama}
+              className="flex-1 bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white font-medium"
+            >
+              {isProcessing ? (
+                <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Generating...</>
               ) : (
-                <>
-                  <Sparkles className="w-4 h-4 mr-2" />
-                  Gemini AI
-                </>
+                <><Sparkles className="w-4 h-4 mr-2" />Generate Stories</>
               )}
             </Button>
 
-            {/* Llama Button */}
-            <Button 
-              onClick={() => generateUserStories('llama')} 
-              className="w-full bg-gradient-to-r from-green-500 to-teal-600 hover:from-green-600 hover:to-teal-700 dark:from-green-400 dark:to-teal-500 dark:hover:from-green-500 dark:hover:to-teal-600 text-white font-medium"
-              disabled={!isLlamaAvailable || isProcessing || !requirements.trim() || isExtracting}
-              title={!isLlamaAvailable ? 'Llama model not available. Please ensure Ollama is running.' : `Generate with local Llama model (${llamaModel})`}
+            <Button
+              variant="outline"
+              onClick={() => {
+                const validation = safeValidateRequirements({ requirements, selectedKeywords, numStories });
+                if (!validation.success) { setError(validation.error || 'Validation failed'); return; }
+                setComparisonPrompt(buildPrompt());
+              }}
+              disabled={!requirements.trim() || isProcessing || isExtracting}
+              className="border-purple-300 dark:border-purple-700 text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950"
+              title="Run the same prompt on all available models and compare results"
             >
-              {isCheckingLlama ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Checking...
-                </>
-              ) : isProcessing && userStoryResult?.model === 'llama' ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Generating...
-                </>
-              ) : (
-                <>
-                  <Cpu className="w-4 h-4 mr-2" />
-                  {isLlamaAvailable && llamaModel ? (
-                    <span className="flex flex-col items-start">
-                      <span>Llama Local</span>
-                      <span className="text-xs opacity-80">({llamaModel})</span>
-                    </span>
-                  ) : (
-                    `Llama (Offline)`
-                  )}
-                </>
-              )}
+              <BarChart2 className="w-4 h-4 mr-2" />
+              Compare
             </Button>
           </div>
-          
-          {isLlamaAvailable && llamaModel && (
-            <div className="text-xs text-gray-600 dark:text-gray-300 mt-2 p-2 bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded flex items-center">
-              <CheckCircle className="w-4 h-4 mr-2 text-green-600 dark:text-green-400" />
-              <span>Llama model <strong>{llamaModel}</strong> is ready on your local machine</span>
-            </div>
-          )}
-          
-          {!isLlamaAvailable && !isCheckingLlama && (
-            <div className="text-xs text-gray-500 dark:text-gray-400 mt-2 p-2 bg-yellow-50 dark:bg-yellow-950 border border-yellow-200 dark:border-yellow-800 rounded">
-              Tip: To use the local Llama model, install and run <a href="https://ollama.ai" target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline">Ollama</a> on your machine.
-            </div>
-          )}
+
+          {/* Model status indicators */}
+          <div className="flex flex-wrap gap-2">
+            <span className="text-xs px-2 py-1 rounded-full bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800">
+              ✓ Gemini ready
+            </span>
+            {isGroqAvailable && (
+              <span className="text-xs px-2 py-1 rounded-full bg-orange-50 dark:bg-orange-950 text-orange-600 dark:text-orange-400 border border-orange-200 dark:border-orange-800">
+                ✓ Groq ready · {groqModel}
+              </span>
+            )}
+            {isLlamaAvailable && (
+              <span className="text-xs px-2 py-1 rounded-full bg-green-50 dark:bg-green-950 text-green-600 dark:text-green-400 border border-green-200 dark:border-green-800">
+                ✓ Llama ready · {llamaModel}
+              </span>
+            )}
+            {isQwenAvailable && (
+              <span className="text-xs px-2 py-1 rounded-full bg-purple-50 dark:bg-purple-950 text-purple-600 dark:text-purple-400 border border-purple-200 dark:border-purple-800">
+                ✓ Qwen ready · {qwenModel}
+              </span>
+            )}
+            {!isLlamaAvailable && !isCheckingLlama && (
+              <span className="text-xs px-2 py-1 rounded-full bg-gray-50 dark:bg-gray-800 text-gray-400 border border-gray-200 dark:border-gray-700">
+                Ollama offline
+              </span>
+            )}
+          </div>
         </div>
       </Card>
 
@@ -918,7 +996,7 @@ Make each story clear, concise, and testable.`;
                 
                 {userStoryResult.status === 'completed' && userStoryResult.userStories && (
                   <div className="flex gap-2">
-                    <Button onClick={downloadUserStories} variant="outline" size="sm">
+                    <Button onClick={downloadUserStories} variant="outline" size="sm" disabled={isExportingJira}>
                       <Download className="w-4 h-4 mr-2" />
                       Download
                     </Button>
@@ -1065,6 +1143,15 @@ Make each story clear, concise, and testable.`;
             </div>
           )}
         </Card>
+      )}
+
+      {/* Model Comparison */}
+      {comparisonPrompt && (
+        <ModelComparison
+          prompt={comparisonPrompt}
+          availableModels={{ gemini: true, groq: isGroqAvailable, llama: isLlamaAvailable, qwen: isQwenAvailable }}
+          onClose={() => setComparisonPrompt(null)}
+        />
       )}
 
       {/* Instructions */}

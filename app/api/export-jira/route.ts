@@ -147,5 +147,6 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ results, errors, total: blocks.length });
+  const status = results.length === 0 ? 500 : 200;
+  return NextResponse.json({ results, errors, total: blocks.length }, { status });
 }

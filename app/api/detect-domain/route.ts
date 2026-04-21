@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { apiRateLimiter } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -13,6 +14,9 @@ const DOMAIN_CATEGORIES = [
 ];
 
 export async function POST(req: NextRequest) {
+  const rateLimitResult = await apiRateLimiter(req);
+  if (rateLimitResult) return rateLimitResult;
+
   if (!apiKey || !genAI) {
     return NextResponse.json({ error: 'API not configured' }, { status: 500 });
   }

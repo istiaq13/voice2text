@@ -6,7 +6,7 @@ export interface UserStoryResult {
   numStories: number;
   timestamp: Date;
   status: 'processing' | 'completed' | 'error';
-  model?: 'gemini' | 'llama';
+  model?: AIModel;
   outputFormat?: OutputFormat;
 }
 
@@ -30,7 +30,7 @@ export interface ModelAvailability {
 }
 
 // AI Model types
-export type AIModel = 'gemini' | 'llama';
+export type AIModel = 'gemini' | 'groq' | 'llama' | 'qwen';
 
 // Output format types
 export type OutputFormat = 'standard' | 'gherkin' | 'invest' | 'jira';
