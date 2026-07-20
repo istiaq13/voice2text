@@ -2,38 +2,26 @@
 
 import React, { useState, useCallback, useEffect } from 'react';
 import { useDropzone, FileRejection } from 'react-dropzone';
-import { Upload, FileText, FileAudio, Loader2, CheckCircle, AlertCircle, Download, X, Plus, Sparkles, Cpu, Tag, Mic, Moon, Sun, BarChart2 } from 'lucide-react';
+import { FileText, FileAudio, Loader2, AlertCircle, X, Plus, Sparkles, Cpu, Tag, Moon, Sun, BarChart2 } from 'lucide-react';
 import { Button } from '@/components/core/button';
 import { Card } from '@/components/core/layout';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Input, Textarea } from '@/components/core/form';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/core/layout';
 import { Badge } from '@/components/ui/badge';
-import { FileUploadSkeleton, UserStoryLoadingSkeleton } from '@/components/ui/skeleton';
-import { transcribeAudio } from '@/lib/gemini';
+import { FileUploadSkeleton } from '@/components/ui/skeleton';
 import { useTheme } from '@/contexts/ThemeContext';
 import { safeValidateRequirements } from '@/lib/validators';
+import { KEYWORD_CATEGORIES, autoSuggestKeywords, filterKeywords } from '@/lib/keywords';
+import { buildPrompt } from '@/lib/prompt-builder';
+import { useModelAvailability } from '@/hooks/useModelAvailability';
+import { StoryResult } from '@/components/story-generator/StoryResult';
+import { JiraResults, type JiraExportResult } from '@/components/story-generator/JiraResults';
 import type { UserStoryResult, AIModel, OutputFormat } from '@/types';
 import ModelComparison from '@/components/ModelComparison';
 
-// Enhanced keyword configuration with categories
-const KEYWORD_CATEGORIES = {
-  'E-commerce': ['Shopping Cart', 'Payment', 'Checkout', 'Product Catalog', 'Inventory', 'Order Management', 'Shipping'],
-  'Authentication': ['Login', 'Registration', 'Password Reset', 'OAuth', 'Two-Factor Auth', 'Session Management', 'User Roles'],
-  'Social Media': ['Posts', 'Comments', 'Likes', 'Shares', 'Follow', 'Messaging', 'Notifications', 'Profile'],
-  'Analytics': ['Dashboard', 'Reports', 'Charts', 'Metrics', 'KPIs', 'Data Export', 'Real-time Updates'],
-  'Project Management': ['Tasks', 'Projects', 'Teams', 'Deadlines', 'Milestones', 'Kanban Board', 'Time Tracking'],
-  'Healthcare': ['Appointments', 'Patients', 'Medical Records', 'Prescriptions', 'Diagnosis', 'Billing', 'Insurance'],
-  'Education': ['Courses', 'Students', 'Assignments', 'Grades', 'Exams', 'Enrollment', 'Certifications'],
-  'Communication': ['Chat', 'Video Call', 'Email', 'SMS', 'Push Notifications', 'File Sharing', 'Screen Sharing'],
-  'AI/ML': ['Machine Learning', 'Natural Language', 'Computer Vision', 'Predictions', 'Training', 'Model Deployment'],
-  'Mobile': ['iOS', 'Android', 'Push Notifications', 'Offline Mode', 'Camera', 'GPS', 'Biometrics']
-};
-
-// Flatten all keywords for search
-const ALL_KEYWORDS = Object.values(KEYWORD_CATEGORIES).flat();
-
 export default function AudioUploader() {
   const { theme, toggleTheme } = useTheme();
+  const models = useModelAvailability();
   const [isProcessing, setIsProcessing] = useState(false);
   const [userStoryResult, setUserStoryResult] = useState<UserStoryResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -47,85 +35,32 @@ export default function AudioUploader() {
   const [inputMethod, setInputMethod] = useState<'text' | 'file'>('text');
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [isExtracting, setIsExtracting] = useState(false);
-  const [isLlamaAvailable, setIsLlamaAvailable] = useState(false);
-  const [isCheckingLlama, setIsCheckingLlama] = useState(true);
-  const [llamaModel, setLlamaModel] = useState<string>('');
-  const [isGroqAvailable, setIsGroqAvailable] = useState(false);
-  const [groqModel, setGroqModel] = useState<string>('');
-  const [isQwenAvailable, setIsQwenAvailable] = useState(false);
-  const [qwenModel, setQwenModel] = useState<string>('');
   const [selectedModel, setSelectedModel] = useState<AIModel>('gemini');
   const [outputFormat, setOutputFormat] = useState<OutputFormat>('standard');
   const [detectedDomain, setDetectedDomain] = useState<string | null>(null);
   const [isDetectingDomain, setIsDetectingDomain] = useState(false);
   const [isExportingJira, setIsExportingJira] = useState(false);
-  const [jiraResults, setJiraResults] = useState<{ results: { key: string; url: string; summary: string }[]; errors: { summary: string; error: string }[] } | null>(null);
+  const [jiraResults, setJiraResults] = useState<JiraExportResult | null>(null);
   const [comparisonPrompt, setComparisonPrompt] = useState<string | null>(null);
 
-  // Maximum keywords limit
   const MAX_KEYWORDS = 10;
 
   // Auto-suggest keywords based on requirements text
   useEffect(() => {
     if (requirements.length > 50) {
-      const suggested = autoSuggestKeywords(requirements);
-      setSuggestedKeywords(suggested);
+      setSuggestedKeywords(autoSuggestKeywords(requirements, selectedKeywords));
     } else {
       setSuggestedKeywords([]);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requirements]);
-
-  // Check model availability on component mount
-  useEffect(() => {
-    const checkAvailability = async () => {
-      const [llamaRes, groqRes, qwenRes] = await Promise.allSettled([
-        fetch('/api/generate-stories-llama').then(r => r.json()),
-        fetch('/api/generate-stories-groq').then(r => r.json()),
-        fetch('/api/generate-stories-qwen').then(r => r.json()),
-      ]);
-
-      if (llamaRes.status === 'fulfilled') {
-        setIsLlamaAvailable(llamaRes.value.available || false);
-        if (llamaRes.value.model) setLlamaModel(llamaRes.value.model);
-      }
-      if (groqRes.status === 'fulfilled') {
-        setIsGroqAvailable(groqRes.value.available || false);
-        if (groqRes.value.model) setGroqModel(groqRes.value.model);
-      }
-      if (qwenRes.status === 'fulfilled') {
-        setIsQwenAvailable(qwenRes.value.available || false);
-        if (qwenRes.value.model) setQwenModel(qwenRes.value.model);
-      }
-
-      setIsCheckingLlama(false);
-    };
-
-    checkAvailability();
-  }, []);
-
-  // Auto-suggest keywords based on text analysis
-  function autoSuggestKeywords(text: string): string[] {
-    const textLower = text.toLowerCase();
-    const suggestions: string[] = [];
-
-    ALL_KEYWORDS.forEach(keyword => {
-      if (textLower.includes(keyword.toLowerCase()) && 
-          !selectedKeywords.includes(keyword)) {
-        suggestions.push(keyword);
-      }
-    });
-
-    // Return top 5 suggestions
-    return suggestions.slice(0, 5);
-  }
 
   // Add keyword with validation
   function addKeyword(keyword: string) {
     const trimmedKeyword = keyword.trim();
-    
-    // Validation
+
     if (!trimmedKeyword) return;
-    
+
     if (selectedKeywords.length >= MAX_KEYWORDS) {
       setError(`Maximum ${MAX_KEYWORDS} keywords allowed`);
       setTimeout(() => setError(''), 3000);
@@ -144,16 +79,14 @@ export default function AudioUploader() {
       return;
     }
 
-    setSelectedKeywords(prev => [...prev, trimmedKeyword]);
+    setSelectedKeywords((prev) => [...prev, trimmedKeyword]);
     setCustomKeyword('');
   }
 
-  // Remove keyword
   function removeKeyword(keyword: string) {
-    setSelectedKeywords(prev => prev.filter(k => k !== keyword));
+    setSelectedKeywords((prev) => prev.filter((k) => k !== keyword));
   }
 
-  // Toggle keyword
   function toggleKeyword(keyword: string) {
     if (selectedKeywords.includes(keyword)) {
       removeKeyword(keyword);
@@ -162,7 +95,6 @@ export default function AudioUploader() {
     }
   }
 
-  // Clear all keywords
   function clearAllKeywords() {
     setSelectedKeywords([]);
   }
@@ -203,130 +135,7 @@ export default function AudioUploader() {
     }
   }
 
-  // Build prompt based on selected output format
-  function buildPrompt(): string {
-    const domainContext = detectedDomain
-      ? `This is a ${detectedDomain} domain system.`
-      : '';
-
-    const keywordsText =
-      selectedKeywords.length > 0
-        ? `Prioritise these functional areas: ${selectedKeywords.join(', ')}.`
-        : '';
-
-    const sharedRules = `
-RULES — follow all of these strictly:
-1. Extract the specific user roles from the requirements (e.g. "student", "librarian", "admin"). Never use the generic word "user" — always use a specific role.
-2. Each story must cover a completely distinct feature. No two stories may overlap or duplicate each other.
-3. The "so that" clause must state a real business outcome or user benefit — not just restate the action (e.g. "so that I can track overdue fines across departments" not "so that I can manage fines").
-4. Every acceptance criterion must be specific: include real data values, error states, or edge cases (e.g. "Given the student has 3 overdue books" not "Given the user is logged in").
-5. Each story must be small enough to complete in one sprint. If a feature is too large, split it.`;
-
-    switch (outputFormat) {
-      case 'gherkin':
-        return `You are an expert agile business analyst. Generate exactly ${numStories} user stories in Gherkin BDD format.
-${domainContext}
-
-Requirements:
-${requirements}
-
-${keywordsText}
-${sharedRules}
-
-Format each story exactly as:
-N. Feature: [specific feature name]
-   As a [specific role], I want [specific goal] so that [real business outcome].
-
-   Scenario: [descriptive scenario name]
-     Given [specific initial state with real data]
-     When [specific action taken]
-     Then [specific measurable result]
-
-   Scenario: [edge case or error scenario]
-     Given [specific condition]
-     When [action]
-     Then [expected system response]`;
-
-      case 'invest':
-        return `You are an expert agile business analyst. Generate exactly ${numStories} user stories that fully satisfy the INVEST criteria.
-${domainContext}
-
-Requirements:
-${requirements}
-
-${keywordsText}
-${sharedRules}
-
-Format each story exactly as:
-N. Story: As a [specific role], I want [specific goal] so that [real business outcome].
-   Independent: [explain how this story can be built and deployed without depending on other stories]
-   Valuable: [explain the measurable business or user value delivered]
-   Estimable: [XS / S / M / L / XL — justify the size in one sentence]
-   Small: [Yes / No — if No, suggest how to split it]
-   Testable: [describe exactly how QA would verify this story is complete]`;
-
-      case 'jira':
-        return `You are an expert agile business analyst. Generate exactly ${numStories} user stories in Jira-ready format.
-${domainContext}
-
-Requirements:
-${requirements}
-
-${keywordsText}
-${sharedRules}
-
-Format each story exactly as:
-N. Summary: [action-oriented title under 80 characters, e.g. "Book search by ISBN with real-time availability"]
-   Description: As a [specific role], I want [specific goal] so that [real business outcome].
-   Acceptance Criteria:
-   - Given [specific state], When [specific action], Then [specific measurable result]
-   - Given [error/edge case], When [action], Then [expected system behaviour]
-   Story Points: [1 / 2 / 3 / 5 / 8]
-   Labels: [2–4 relevant labels from the requirements, comma-separated]`;
-
-      default: // standard
-        return `You are an expert agile business analyst. Generate exactly ${numStories} user stories.
-${domainContext}
-
-Requirements:
-${requirements}
-
-${keywordsText}
-${sharedRules}
-
-Format each story exactly as:
-N. As a [specific role], I want [specific goal] so that [real business outcome].
-   Acceptance Criteria:
-   - Given [specific state with real data], When [specific action], Then [specific measurable result]
-   - Given [error or edge case], When [action], Then [expected system behaviour]`;
-    }
-  }
-
-  // Get filtered keywords based on search and category
-  function getFilteredKeywords(): string[] {
-    let keywords: string[] = [];
-
-    if (selectedCategory === 'All') {
-      keywords = ALL_KEYWORDS;
-    } else {
-      keywords = KEYWORD_CATEGORIES[selectedCategory as keyof typeof KEYWORD_CATEGORIES] || [];
-    }
-
-    if (keywordSearch.trim()) {
-      keywords = keywords.filter(k => 
-        k.toLowerCase().includes(keywordSearch.toLowerCase())
-      );
-    }
-
-    return keywords;
-  }
-
-  // Legacy functions for compatibility (now use the new functions above)
-  const handleKeywordSelect = (keyword: string) => addKeyword(keyword);
-  const handleKeywordRemove = (keyword: string) => removeKeyword(keyword);
-
   const onDrop = useCallback(async (acceptedFiles: File[], fileRejections: FileRejection[]) => {
-    // Handle file rejections
     if (fileRejections.length > 0) {
       const rejection = fileRejections[0];
       if (rejection.errors[0]?.code === 'too-many-files') {
@@ -349,7 +158,6 @@ N. As a [specific role], I want [specific goal] so that [real business outcome].
     setIsExtracting(true);
 
     try {
-      // Use the unified extract-text API for all file types
       const formData = new FormData();
       formData.append('file', file);
       formData.append('model', 'gemini'); // Default to Gemini for audio/video
@@ -365,22 +173,19 @@ N. As a [specific role], I want [specific goal] so that [real business outcome].
       }
 
       const data = await response.json();
-      
+
       if (!data.text || !data.text.trim()) {
         setError('No text was extracted from the file. The file might be empty or corrupted.');
         return;
       }
 
       setRequirements(data.text);
-      
-      // Manually trigger keyword suggestions after file extraction
+
       if (data.text.length > 50) {
-        const suggested = autoSuggestKeywords(data.text);
-        setSuggestedKeywords(suggested);
+        setSuggestedKeywords(autoSuggestKeywords(data.text, selectedKeywords));
       }
-      
+
       console.log(`✅ Extracted ${data.characterCount} characters using ${data.method}`);
-      
     } catch (err) {
       console.error('File extraction error:', err);
       const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
@@ -388,33 +193,26 @@ N. As a [specific role], I want [specific goal] so that [real business outcome].
     } finally {
       setIsExtracting(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     accept: {
-      // Documents
       'application/pdf': ['.pdf'],
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
       'text/plain': ['.txt'],
       'text/markdown': ['.md'],
-      // Audio
       'audio/*': ['.mp3', '.wav', '.m4a', '.ogg', '.webm'],
-      // Video
-      'video/*': ['.mp4', '.mov', '.avi', '.webm']
+      'video/*': ['.mp4', '.mov', '.avi', '.webm'],
     },
     maxFiles: 1,
     maxSize: 100 * 1024 * 1024, // 100MB
-    disabled: isProcessing || isExtracting
+    disabled: isProcessing || isExtracting,
   });
 
   const generateUserStories = async (model: AIModel = 'gemini') => {
-    // Validate using Zod schema
-    const validation = safeValidateRequirements({
-      requirements,
-      selectedKeywords,
-      numStories,
-    });
+    const validation = safeValidateRequirements({ requirements, selectedKeywords, numStories });
 
     if (!validation.success) {
       setError(validation.error || 'Validation failed');
@@ -434,18 +232,16 @@ N. As a [specific role], I want [specific goal] so that [real business outcome].
     });
 
     try {
-      const prompt = buildPrompt();
+      const prompt = buildPrompt({ outputFormat, numStories, requirements, keywords: selectedKeywords, detectedDomain });
       const apiEndpoint =
         model === 'llama' ? '/api/generate-stories-llama' :
-        model === 'groq'  ? '/api/generate-stories-groq' :
-        model === 'qwen'  ? '/api/generate-stories-qwen' :
+        model === 'groq' ? '/api/generate-stories-groq' :
+        model === 'qwen' ? '/api/generate-stories-qwen' :
         '/api/generate-stories';
-      
+
       const response = await fetch(apiEndpoint, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt }),
       });
 
@@ -455,12 +251,12 @@ N. As a [specific role], I want [specific goal] so that [real business outcome].
       }
 
       const data = await response.json();
-      
+
       if (!data.stories || data.stories.trim().length === 0) {
         throw new Error('No user stories were generated. Please try again with different requirements.');
       }
 
-      const result: UserStoryResult = {
+      setUserStoryResult({
         requirements,
         keywords: selectedKeywords,
         userStories: data.stories,
@@ -469,15 +265,12 @@ N. As a [specific role], I want [specific goal] so that [real business outcome].
         status: 'completed',
         model,
         outputFormat,
-      };
-
-      setUserStoryResult(result);
-      
+      });
     } catch (err) {
       console.error('Story generation error:', err);
       const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred';
       setError(`Failed to generate user stories: ${errorMessage}`);
-      setUserStoryResult(prev => prev ? { ...prev, status: 'error' } : null);
+      setUserStoryResult((prev) => (prev ? { ...prev, status: 'error' } : null));
     } finally {
       setIsProcessing(false);
     }
@@ -523,7 +316,6 @@ N. As a [specific role], I want [specific goal] so that [real business outcome].
     <div className="max-w-6xl mx-auto p-6 space-y-8">
       {/* Header */}
       <div className="text-center space-y-4 relative">
-        {/* Theme Toggle Button - Absolute positioned in top-right */}
         <button
           onClick={toggleTheme}
           className="absolute top-0 right-0 p-2 rounded-lg bg-white dark:bg-gray-800 shadow-md hover:shadow-lg transition-all duration-200 border border-gray-200 dark:border-gray-700"
@@ -552,7 +344,7 @@ N. As a [specific role], I want [specific goal] so that [real business outcome].
             <TabsTrigger value="text">Manual Input</TabsTrigger>
             <TabsTrigger value="file">File Upload</TabsTrigger>
           </TabsList>
-          
+
           <TabsContent value="text" className="space-y-4">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Enter Software Requirements</h3>
             <Textarea
@@ -563,21 +355,21 @@ N. As a [specific role], I want [specific goal] so that [real business outcome].
               disabled={isProcessing}
             />
           </TabsContent>
-          
+
           <TabsContent value="file" className="space-y-4">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Upload Requirements File</h3>
             <div
               {...getRootProps()}
               className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer
-                ${isDragActive 
-                  ? 'border-blue-400 bg-blue-50 dark:border-blue-500 dark:bg-blue-900/20' 
+                ${isDragActive
+                  ? 'border-blue-400 bg-blue-50 dark:border-blue-500 dark:bg-blue-900/20'
                   : 'border-gray-300 hover:border-blue-400 hover:bg-gray-50 dark:border-gray-600 dark:hover:border-blue-500 dark:hover:bg-gray-800'
                 }
                 ${isProcessing || isExtracting ? 'opacity-50 cursor-not-allowed' : ''}
               `}
             >
               <input {...getInputProps()} />
-              
+
               {isExtracting ? (
                 <div className="space-y-4">
                   <FileUploadSkeleton />
@@ -615,14 +407,14 @@ N. As a [specific role], I want [specific goal] so that [real business outcome].
                 </div>
               )}
             </div>
-            
+
             {uploadedFile && (
               <div className="flex items-center space-x-2 text-sm text-gray-600 dark:text-gray-300">
                 <FileText className="w-4 h-4" />
                 <span>Uploaded: {uploadedFile.name}</span>
               </div>
             )}
-            
+
             {requirements && (
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
@@ -650,9 +442,9 @@ N. As a [specific role], I want [specific goal] so that [real business outcome].
       {/* Configuration */}
       <Card className="p-6 space-y-6">
         <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Configuration</h3>
-        
+
         <div className="grid md:grid-cols-4 gap-6">
-          {/* Number of Stories - Takes 1 column */}
+          {/* Number of Stories */}
           <div className="space-y-2">
             <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Number of Stories</label>
             <Select value={numStories.toString()} onValueChange={(value: string) => setNumStories(parseInt(value))}>
@@ -669,7 +461,7 @@ N. As a [specific role], I want [specific goal] so that [real business outcome].
             </Select>
           </div>
 
-          {/* Output Format - Takes 1 column */}
+          {/* Output Format */}
           <div className="space-y-2">
             <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Output Format</label>
             <Select value={outputFormat} onValueChange={(value: string) => setOutputFormat(value as OutputFormat)}>
@@ -685,7 +477,7 @@ N. As a [specific role], I want [specific goal] so that [real business outcome].
             </Select>
           </div>
 
-          {/* Enhanced Keywords Section - Takes 2 columns */}
+          {/* Keywords */}
           <div className="md:col-span-2 space-y-4">
             <div className="flex items-center justify-between">
               <label className="text-sm font-medium flex items-center gap-2">
@@ -693,19 +485,13 @@ N. As a [specific role], I want [specific goal] so that [real business outcome].
                 Keywords ({selectedKeywords.length}/{MAX_KEYWORDS})
               </label>
               {selectedKeywords.length > 0 && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={clearAllKeywords}
-                  className="text-xs"
-                >
+                <Button type="button" variant="outline" size="sm" onClick={clearAllKeywords} className="text-xs">
                   Clear All
                 </Button>
               )}
             </div>
 
-            {/* Selected Keywords Display */}
+            {/* Selected Keywords */}
             {selectedKeywords.length > 0 && (
               <div className="flex flex-wrap gap-2 p-3 bg-blue-50 dark:bg-blue-950 rounded-lg border border-blue-200 dark:border-blue-800">
                 {selectedKeywords.map((keyword) => (
@@ -803,15 +589,15 @@ N. As a [specific role], I want [specific goal] so that [real business outcome].
 
             {/* Predefined Keywords Grid */}
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 max-h-48 overflow-y-auto p-2 bg-gray-50 dark:bg-gray-800 rounded-lg border dark:border-gray-700">
-              {getFilteredKeywords().map((keyword) => {
+              {filterKeywords(selectedCategory, keywordSearch).map((keyword) => {
                 const isSelected = selectedKeywords.includes(keyword);
                 return (
                   <Badge
                     key={keyword}
                     variant={isSelected ? 'default' : 'outline'}
                     className={`cursor-pointer justify-center text-center ${
-                      isSelected 
-                        ? 'bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600' 
+                      isSelected
+                        ? 'bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600'
                         : 'hover:bg-gray-100 dark:hover:bg-gray-700'
                     }`}
                     onClick={() => toggleKeyword(keyword)}
@@ -858,10 +644,7 @@ N. As a [specific role], I want [specific goal] so that [real business outcome].
         <div className="space-y-3">
           <label className="text-sm font-medium text-gray-700 dark:text-gray-300">AI Model</label>
           <div className="flex gap-3">
-            <Select
-              value={selectedModel}
-              onValueChange={(value: string) => setSelectedModel(value as AIModel)}
-            >
+            <Select value={selectedModel} onValueChange={(value: string) => setSelectedModel(value as AIModel)}>
               <SelectTrigger className="w-64">
                 <SelectValue />
               </SelectTrigger>
@@ -873,25 +656,25 @@ N. As a [specific role], I want [specific goal] so that [real business outcome].
                     <span className="text-xs text-gray-400 ml-1">Google</span>
                   </div>
                 </SelectItem>
-                <SelectItem value="groq" disabled={!isGroqAvailable}>
+                <SelectItem value="groq" disabled={!models.groq}>
                   <div className="flex items-center gap-2">
                     <Cpu className="w-4 h-4 text-orange-500" />
                     <span>Llama 3.3 70B</span>
-                    <span className="text-xs text-gray-400 ml-1">Groq {!isGroqAvailable && '· not configured'}</span>
+                    <span className="text-xs text-gray-400 ml-1">Groq {!models.groq && '· not configured'}</span>
                   </div>
                 </SelectItem>
-                <SelectItem value="llama" disabled={!isLlamaAvailable}>
+                <SelectItem value="llama" disabled={!models.llama}>
                   <div className="flex items-center gap-2">
                     <Cpu className="w-4 h-4 text-green-500" />
                     <span>Llama 3.1 8B</span>
-                    <span className="text-xs text-gray-400 ml-1">{isLlamaAvailable ? llamaModel : 'Ollama offline'}</span>
+                    <span className="text-xs text-gray-400 ml-1">{models.llama ? models.llamaModel : 'Ollama offline'}</span>
                   </div>
                 </SelectItem>
-                <SelectItem value="qwen" disabled={!isQwenAvailable}>
+                <SelectItem value="qwen" disabled={!models.qwen}>
                   <div className="flex items-center gap-2">
                     <Cpu className="w-4 h-4 text-purple-500" />
                     <span>Qwen 2.5 7B</span>
-                    <span className="text-xs text-gray-400 ml-1">{isQwenAvailable ? qwenModel : 'not pulled'}</span>
+                    <span className="text-xs text-gray-400 ml-1">{models.qwen ? models.qwenModel : 'not pulled'}</span>
                   </div>
                 </SelectItem>
               </SelectContent>
@@ -899,7 +682,7 @@ N. As a [specific role], I want [specific goal] so that [real business outcome].
 
             <Button
               onClick={() => generateUserStories(selectedModel)}
-              disabled={isProcessing || !requirements.trim() || isExtracting || isCheckingLlama}
+              disabled={isProcessing || !requirements.trim() || isExtracting || models.isChecking}
               className="flex-1 bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 text-white font-medium"
             >
               {isProcessing ? (
@@ -913,8 +696,11 @@ N. As a [specific role], I want [specific goal] so that [real business outcome].
               variant="outline"
               onClick={() => {
                 const validation = safeValidateRequirements({ requirements, selectedKeywords, numStories });
-                if (!validation.success) { setError(validation.error || 'Validation failed'); return; }
-                setComparisonPrompt(buildPrompt());
+                if (!validation.success) {
+                  setError(validation.error || 'Validation failed');
+                  return;
+                }
+                setComparisonPrompt(buildPrompt({ outputFormat, numStories, requirements, keywords: selectedKeywords, detectedDomain }));
               }}
               disabled={!requirements.trim() || isProcessing || isExtracting}
               className="border-purple-300 dark:border-purple-700 text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950"
@@ -930,22 +716,22 @@ N. As a [specific role], I want [specific goal] so that [real business outcome].
             <span className="text-xs px-2 py-1 rounded-full bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800">
               ✓ Gemini ready
             </span>
-            {isGroqAvailable && (
+            {models.groq && (
               <span className="text-xs px-2 py-1 rounded-full bg-orange-50 dark:bg-orange-950 text-orange-600 dark:text-orange-400 border border-orange-200 dark:border-orange-800">
-                ✓ Groq ready · {groqModel}
+                ✓ Groq ready · {models.groqModel}
               </span>
             )}
-            {isLlamaAvailable && (
+            {models.llama && (
               <span className="text-xs px-2 py-1 rounded-full bg-green-50 dark:bg-green-950 text-green-600 dark:text-green-400 border border-green-200 dark:border-green-800">
-                ✓ Llama ready · {llamaModel}
+                ✓ Llama ready · {models.llamaModel}
               </span>
             )}
-            {isQwenAvailable && (
+            {models.qwen && (
               <span className="text-xs px-2 py-1 rounded-full bg-purple-50 dark:bg-purple-950 text-purple-600 dark:text-purple-400 border border-purple-200 dark:border-purple-800">
-                ✓ Qwen ready · {qwenModel}
+                ✓ Qwen ready · {models.qwenModel}
               </span>
             )}
-            {!isLlamaAvailable && !isCheckingLlama && (
+            {!models.llama && !models.isChecking && (
               <span className="text-xs px-2 py-1 rounded-full bg-gray-50 dark:bg-gray-800 text-gray-400 border border-gray-200 dark:border-gray-700">
                 Ollama offline
               </span>
@@ -966,190 +752,22 @@ N. As a [specific role], I want [specific goal] so that [real business outcome].
 
       {/* User Stories Result */}
       {userStoryResult && (
-        <Card className="p-6 space-y-6">
-          {userStoryResult.status === 'processing' ? (
-            <UserStoryLoadingSkeleton />
-          ) : (
-            <>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-3">
-                  {userStoryResult.status === 'completed' && (
-                    <CheckCircle className="w-5 h-5 text-green-600" />
-                  )}
-                  {userStoryResult.status === 'error' && (
-                    <AlertCircle className="w-5 h-5 text-red-600" />
-                  )}
-                  <div>
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-                      Generated {userStoryResult.numStories} User Stories
-                    </h3>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
-                      {userStoryResult.timestamp?.toLocaleString?.() || 'Processing...'}
-                      {userStoryResult.model && (
-                        <span className="ml-2">
-                          • Model: <span className="font-medium capitalize">{userStoryResult.model}</span>
-                        </span>
-                      )}
-                    </p>
-                  </div>
-                </div>
-                
-                {userStoryResult.status === 'completed' && userStoryResult.userStories && (
-                  <div className="flex gap-2">
-                    <Button onClick={downloadUserStories} variant="outline" size="sm" disabled={isExportingJira}>
-                      <Download className="w-4 h-4 mr-2" />
-                      Download
-                    </Button>
-                    <Button
-                      onClick={exportToJira}
-                      disabled={isExportingJira}
-                      size="sm"
-                      className="bg-blue-600 hover:bg-blue-700 text-white"
-                    >
-                      {isExportingJira ? (
-                        <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Exporting...</>
-                      ) : (
-                        <>
-                          <svg className="w-4 h-4 mr-2" viewBox="0 0 24 24" fill="currentColor">
-                            <path d="M11.571 11.513H0a5.218 5.218 0 0 0 5.232 5.215h2.13v2.057A5.215 5.215 0 0 0 12.575 24V12.518a1.005 1.005 0 0 0-1.004-1.005zm5.723-5.756H5.736a5.215 5.215 0 0 0 5.215 5.214h2.129v2.058a5.218 5.218 0 0 0 5.215 5.214V6.762a1.005 1.005 0 0 0-1.001-1.005zM23.013 0H11.459a5.215 5.215 0 0 0 5.214 5.215h2.129v2.057A5.215 5.215 0 0 0 24.017 12.49V1.005A1.005 1.005 0 0 0 23.013 0z"/>
-                          </svg>
-                          Export to Jira
-                        </>
-                      )}
-                    </Button>
-                  </div>
-                )}
-              </div>
-
-              {userStoryResult.status === 'completed' && userStoryResult.userStories && (
-                <div className="space-y-4">
-                  {(() => {
-                    // Group lines into story blocks: each numbered line starts a block,
-                    // subsequent non-numbered lines (AC, scenarios, etc.) are details.
-                    const lines = userStoryResult.userStories.split('\n');
-                    const blocks: Array<{ storyLine: string; details: string[] }> = [];
-                    let current: { storyLine: string; details: string[] } | null = null;
-
-                    for (const line of lines) {
-                      const trimmed = line.trim();
-                      if (!trimmed) continue;
-                      const clean = trimmed.replace(/\*\*/g, '');
-                      const isStory = /^(\d+[\.\)])\s/.test(clean);
-                      if (isStory) {
-                        if (current) blocks.push(current);
-                        current = { storyLine: clean, details: [] };
-                      } else if (current) {
-                        current.details.push(clean);
-                      }
-                    }
-                    if (current) blocks.push(current);
-
-                    return blocks.map((block, idx) => {
-                      const storyContent = block.storyLine.replace(/^(\d+[\.\)])\s/, '');
-                      const storyNum = block.storyLine.match(/^\d+/)?.[0] || String(idx + 1);
-                      const asMatch = storyContent.match(/^As a (.+?),?\s*I want (.+?),?\s*so that (.+?)\.?$/i);
-
-                      return (
-                        <div
-                          key={idx}
-                          className="bg-white dark:bg-gray-800 rounded-lg p-5 border-l-4 border-blue-500 dark:border-blue-400 shadow-sm hover:shadow-md transition-shadow"
-                        >
-                          <div className="flex items-start gap-4">
-                            <div className="flex-shrink-0 w-8 h-8 bg-blue-100 dark:bg-blue-900 rounded-full flex items-center justify-center">
-                              <span className="text-blue-600 dark:text-blue-300 font-semibold text-sm">{storyNum}</span>
-                            </div>
-                            <div className="flex-1 space-y-2">
-                              {asMatch ? (
-                                <p className="text-gray-800 dark:text-gray-200 leading-relaxed">
-                                  <span className="font-semibold text-blue-600 dark:text-blue-400">As a {asMatch[1]}</span>
-                                  <span className="text-gray-600 dark:text-gray-400">, </span>
-                                  <span className="font-medium">I want {asMatch[2]}</span>
-                                  <span className="text-gray-600 dark:text-gray-400"> so that </span>
-                                  <span className="text-gray-700 dark:text-gray-300">{asMatch[3]}</span>
-                                </p>
-                              ) : (
-                                <p className="text-gray-800 dark:text-gray-200 leading-relaxed">{storyContent}</p>
-                              )}
-                              {block.details.length > 0 && (
-                                <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700 space-y-1">
-                                  {block.details.map((detail, di) => {
-                                    const isHeader = !detail.startsWith('-') && !detail.startsWith('Given') && !detail.startsWith('When') && !detail.startsWith('Then') && detail.endsWith(':');
-                                    return (
-                                      <p
-                                        key={di}
-                                        className={`text-sm ${isHeader ? 'font-semibold text-gray-700 dark:text-gray-300 mt-2' : 'text-gray-500 dark:text-gray-400 pl-2'}`}
-                                      >
-                                        {detail}
-                                      </p>
-                                    );
-                                  })}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    });
-                  })()}
-                </div>
-              )}
-            </>
-          )}
-        </Card>
+        <StoryResult
+          result={userStoryResult}
+          isExportingJira={isExportingJira}
+          onDownload={downloadUserStories}
+          onExportJira={exportToJira}
+        />
       )}
 
       {/* Jira Export Results */}
-      {jiraResults && (
-        <Card className="p-6 space-y-4">
-          <div className="flex items-center gap-2">
-            <svg className="w-5 h-5 text-blue-600" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M11.571 11.513H0a5.218 5.218 0 0 0 5.232 5.215h2.13v2.057A5.215 5.215 0 0 0 12.575 24V12.518a1.005 1.005 0 0 0-1.004-1.005zm5.723-5.756H5.736a5.215 5.215 0 0 0 5.215 5.214h2.129v2.058a5.218 5.218 0 0 0 5.215 5.214V6.762a1.005 1.005 0 0 0-1.001-1.005zM23.013 0H11.459a5.215 5.215 0 0 0 5.214 5.215h2.129v2.057A5.215 5.215 0 0 0 24.017 12.49V1.005A1.005 1.005 0 0 0 23.013 0z"/>
-            </svg>
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-              Jira Export — {jiraResults.results.length} of {jiraResults.results.length + jiraResults.errors.length} stories created
-            </h3>
-          </div>
-
-          {jiraResults.results.length > 0 && (
-            <div className="space-y-2">
-              {jiraResults.results.map((issue) => (
-                <div key={issue.key} className="flex items-center gap-3 p-3 bg-green-50 dark:bg-green-950 rounded-lg border border-green-200 dark:border-green-800">
-                  <CheckCircle className="w-4 h-4 text-green-600 dark:text-green-400 flex-shrink-0" />
-                  <a
-                    href={issue.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm font-semibold text-blue-600 dark:text-blue-400 hover:underline flex-shrink-0"
-                  >
-                    {issue.key}
-                  </a>
-                  <span className="text-sm text-gray-600 dark:text-gray-400 truncate">{issue.summary}</span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {jiraResults.errors.length > 0 && (
-            <div className="space-y-2">
-              {jiraResults.errors.map((err, i) => (
-                <div key={i} className="flex items-start gap-3 p-3 bg-red-50 dark:bg-red-950 rounded-lg border border-red-200 dark:border-red-800">
-                  <AlertCircle className="w-4 h-4 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <p className="text-sm text-gray-700 dark:text-gray-300 truncate">{err.summary}</p>
-                    <p className="text-xs text-red-600 dark:text-red-400">{err.error}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
-      )}
+      {jiraResults && <JiraResults results={jiraResults} />}
 
       {/* Model Comparison */}
       {comparisonPrompt && (
         <ModelComparison
           prompt={comparisonPrompt}
-          availableModels={{ gemini: true, groq: isGroqAvailable, llama: isLlamaAvailable, qwen: isQwenAvailable }}
+          availableModels={{ gemini: true, groq: models.groq, llama: models.llama, qwen: models.qwen }}
           onClose={() => setComparisonPrompt(null)}
         />
       )}

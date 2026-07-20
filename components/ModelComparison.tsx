@@ -10,10 +10,9 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer,
 } from 'recharts';
+import { parseStoryBlocks } from '@/lib/story-parser';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
-
-interface StoryBlock { storyLine: string; details: string[] }
 
 interface Metrics {
   total: number;
@@ -69,25 +68,8 @@ const MODEL_ENDPOINTS: Record<string, string> = {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function parseBlocks(text: string): StoryBlock[] {
-  const blocks: StoryBlock[] = [];
-  let current: StoryBlock | null = null;
-  for (const line of text.split('\n')) {
-    const clean = line.trim().replace(/\*\*/g, '');
-    if (!clean) continue;
-    if (/^(\d+[\.\)])\s/.test(clean)) {
-      if (current) blocks.push(current);
-      current = { storyLine: clean, details: [] };
-    } else if (current) {
-      current.details.push(clean);
-    }
-  }
-  if (current) blocks.push(current);
-  return blocks;
-}
-
 function calcMetrics(stories: string): Metrics {
-  const blocks = parseBlocks(stories);
+  const blocks = parseStoryBlocks(stories);
   if (!blocks.length) return { total: 0, formatCompliance: 0, roleSpecificity: 0, acCoverage: 0, uniqueness: 0, avgWordCount: 0, overallScore: 0 };
 
   const formatRe  = /As a .+,?\s*I want .+,?\s*so that .+/i;
@@ -639,7 +621,7 @@ export default function ModelComparison({ prompt, availableModels, onClose }: Pr
 function ResultCard({ model, state, runs, winner }: { model: string; state: PerModelState; runs: number; winner: AggregatedResult | null }) {
   const a = toAggregated(model, state, runs);
   const meta = MODEL_META[model] ?? { label: model, provider: '', color: 'text-gray-600', bg: 'bg-gray-50', border: 'border-gray-200', chartColor: '#6b7280', dot: 'bg-gray-400' };
-  const blocks = a.bestStories ? parseBlocks(a.bestStories) : [];
+  const blocks = a.bestStories ? parseStoryBlocks(a.bestStories) : [];
   const isWinner = winner?.model === model;
 
   return (
