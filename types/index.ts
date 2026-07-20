@@ -15,6 +15,36 @@ export interface TranscriptionResponse {
   transcription: string;
 }
 
+// Timestamped transcription — the foundation of VERA's story-to-source
+// traceability. A word only carries a timestamp if the ASR engine reported
+// one; segments always do.
+export interface TranscriptWord {
+  word: string;
+  start: number; // seconds
+  end: number; // seconds
+  probability: number;
+}
+
+export interface TranscriptSegment {
+  id: number;
+  start: number; // seconds
+  end: number; // seconds
+  text: string;
+  words: TranscriptWord[];
+}
+
+export interface WhisperTranscriptionResponse {
+  engine: 'faster-whisper';
+  model: string;
+  language: string;
+  languageProbability: number;
+  duration: number; // seconds
+  text: string; // full transcript, segments joined
+  segments: TranscriptSegment[];
+  fileName: string;
+  fileSize: number;
+}
+
 export interface StoriesResponse {
   stories: string;
 }
