@@ -2,14 +2,13 @@
 
 import React, { useState, useCallback, useEffect } from 'react';
 import { useDropzone, FileRejection } from 'react-dropzone';
-import { FileText, FileAudio, Loader2, AlertCircle, X, Plus, Sparkles, Cpu, Tag, Moon, Sun, BarChart2 } from 'lucide-react';
+import { FileText, FileAudio, Loader2, AlertCircle, X, Plus, Sparkles, Cpu, Tag, BarChart2 } from 'lucide-react';
 import { Button } from '@/components/core/button';
 import { Card } from '@/components/core/layout';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Input, Textarea } from '@/components/core/form';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/core/layout';
 import { Badge } from '@/components/ui/badge';
 import { FileUploadSkeleton } from '@/components/ui/skeleton';
-import { useTheme } from '@/contexts/ThemeContext';
 import { safeValidateRequirements } from '@/lib/validators';
 import { KEYWORD_CATEGORIES, autoSuggestKeywords, filterKeywords } from '@/lib/keywords';
 import { buildPrompt } from '@/lib/prompt-builder';
@@ -20,7 +19,6 @@ import type { UserStoryResult, AIModel, OutputFormat } from '@/types';
 import ModelComparison from '@/components/ModelComparison';
 
 export default function AudioUploader() {
-  const { theme, toggleTheme } = useTheme();
   const models = useModelAvailability();
   const [isProcessing, setIsProcessing] = useState(false);
   const [userStoryResult, setUserStoryResult] = useState<UserStoryResult | null>(null);
@@ -314,29 +312,6 @@ export default function AudioUploader() {
 
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-8">
-      {/* Header */}
-      <div className="text-center space-y-4 relative">
-        <button
-          onClick={toggleTheme}
-          className="absolute top-0 right-0 p-2 rounded-lg bg-white dark:bg-gray-800 shadow-md hover:shadow-lg transition-all duration-200 border border-gray-200 dark:border-gray-700"
-          aria-label="Toggle theme"
-        >
-          {theme === 'dark' ? (
-            <Sun className="w-5 h-5 text-yellow-500" />
-          ) : (
-            <Moon className="w-5 h-5 text-gray-700" />
-          )}
-        </button>
-
-        <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-100 dark:bg-blue-900 rounded-full mb-4">
-          <FileText className="w-8 h-8 text-blue-600 dark:text-blue-400" />
-        </div>
-        <h1 className="text-4xl font-bold text-gray-900 dark:text-white">User Story Generator</h1>
-        <p className="text-lg text-gray-600 dark:text-gray-300 max-w-3xl mx-auto">
-          Generate user stories from your software requirements using AI-powered analysis
-        </p>
-      </div>
-
       {/* Input Method Selection */}
       <Card className="p-6">
         <Tabs value={inputMethod} onValueChange={(value: string) => setInputMethod(value as 'text' | 'file')} className="space-y-4">

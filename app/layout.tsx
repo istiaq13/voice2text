@@ -9,8 +9,8 @@ const spaceGrotesk = Space_Grotesk({ subsets: ['latin'], variable: '--font-displ
 const jetbrainsMono = JetBrains_Mono({ subsets: ['latin'], variable: '--font-mono', display: 'swap' });
 
 export const metadata: Metadata = {
-  title: 'User Story Generator',
-  description: 'Turn requirement meetings into structured, traceable user stories with AI.',
+  title: 'VERA — Traceable User Stories from Meeting Audio',
+  description: 'VERA turns recorded requirements meetings into structured user stories, each anchored to the moment in the recording it came from.',
 };
 
 export default function RootLayout({
