@@ -36,3 +36,10 @@ yarn-error.log*
 next-env.d.ts
 CLAUDE.md
 /docs
+
+# local experiment data (recordings, gold transcripts) and generated results —
+# real MARS dataset audio/CSVs live here once collected; never meant to be
+# committed. Config templates (*.json) are unaffected.
+/scripts/data/
+/scripts/annotation/
+/scripts/*.csv

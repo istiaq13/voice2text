@@ -22,6 +22,7 @@ export function SiteHeader() {
   const { theme, toggleTheme } = useTheme();
   const pathname = usePathname();
   const inStudio = pathname?.startsWith('/studio');
+  const inTrace = pathname === '/studio/trace';
 
   return (
     <header className="sticky top-0 z-40 border-b border-border/70 bg-background/85 backdrop-blur supports-[backdrop-filter]:bg-background/70">
@@ -68,6 +69,29 @@ export function SiteHeader() {
           </button>
         </nav>
       </div>
+
+      {inStudio && (
+        <div className="border-t border-border/60">
+          <div className="max-w-6xl mx-auto px-6 h-11 flex items-center gap-1">
+            <Link
+              href="/studio"
+              className={`text-xs font-medium px-3 py-1.5 rounded-md transition-colors ${
+                !inTrace ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+              }`}
+            >
+              Quick generate
+            </Link>
+            <Link
+              href="/studio/trace"
+              className={`text-xs font-medium px-3 py-1.5 rounded-md transition-colors ${
+                inTrace ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+              }`}
+            >
+              Traceable (from recording)
+            </Link>
+          </div>
+        </div>
+      )}
     </header>
   );
 }

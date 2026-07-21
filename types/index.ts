@@ -45,6 +45,60 @@ export interface WhisperTranscriptionResponse {
   fileSize: number;
 }
 
+// The refinement-loop ablation's two arms: 'grounded' ties revision feedback
+// to the transcript segment; 'quality-only' improves quality with no mention
+// of the source at all (matching prior quality-only refinement work) — the
+// comparison the study's headline result (RQ3) is built on.
+export type RefinementMode = 'grounded' | 'quality-only';
+
+// One attempt in the source-grounded refinement loop.
+export interface RefinementAttempt {
+  iteration: number;
+  storyText: string;
+  faithfulScore: number;
+  qualityScore: number;
+}
+
+// Three of USeR's eight quality metrics (Hallmann et al., arXiv 2503.02049) —
+// the ones computable on a single story rather than a full backlog. See
+// lib/user-metrics.ts for what's adapted and what's deferred.
+export interface USeRMetrics {
+  formatComplete: number;
+  readable: number;
+  easyLanguage: number;
+}
+
+// The result of grounding one generated story against the transcript and,
+// if needed, running it through the refinement loop.
+export interface VerifiedStory {
+  storyText: string; // the best version kept, not necessarily the last
+  originalStoryText: string;
+  segmentId: number | null;
+  start: number | null;
+  end: number | null;
+  faithfulScore: number;
+  qualityScore: number;
+  faithful: boolean;
+  verified: boolean; // meaning depends on mode: grounded checks faithful AND quality; quality-only checks quality alone
+  reason: string;
+  iterations: number;
+  history: RefinementAttempt[];
+  userMetrics: USeRMetrics;
+  mode: RefinementMode;
+}
+
+export interface VerifyStoriesResponse {
+  judgeProvider: string;
+  mode: RefinementMode;
+  results: VerifiedStory[];
+  summary: {
+    totalStories: number;
+    verifiedCount: number;
+    avgFaithfulScore: number;
+    avgQualityScore: number;
+  };
+}
+
 export interface StoriesResponse {
   stories: string;
 }
