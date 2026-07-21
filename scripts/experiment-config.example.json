@@ -1,0 +1,25 @@
+{
+  "baseUrl": "http://localhost:3000",
+  "models": ["gemini", "llama"],
+  "modes": ["grounded", "quality-only"],
+  "runsPerCondition": 3,
+  "numStories": 5,
+  "maxIterations": 3,
+  "outputCsv": "./experiment-results.csv",
+  "recordings": [
+    {
+      "id": "meeting1-clear",
+      "audioPath": "./data/meeting1-clear.wav",
+      "condition": "clear",
+      "domain": "library",
+      "goldTranscriptPath": "./data/meeting1-gold.txt"
+    },
+    {
+      "id": "meeting1-noisy",
+      "audioPath": "./data/meeting1-noisy.wav",
+      "condition": "noisy",
+      "domain": "library",
+      "goldTranscriptPath": "./data/meeting1-gold.txt"
+    }
+  ]
+}
